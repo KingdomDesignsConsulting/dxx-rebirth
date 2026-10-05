@@ -164,6 +164,7 @@ def bundle_game(build, game, data_root, platform, signing_identity, provisioning
         "UIDeviceFamily": [1, 2],
         "UIRequiresFullScreen": True,
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
+        "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
         "UILaunchScreen": {},
     }
     with (app / "Info.plist").open("wb") as f:

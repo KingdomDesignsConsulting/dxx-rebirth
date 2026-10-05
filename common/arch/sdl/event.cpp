@@ -24,6 +24,7 @@
 #include "cmd.h"
 #include "config.h"
 #include "inferno.h"
+#include "gr.h"
 
 #include "joy.h"
 #include "args.h"
@@ -46,6 +47,24 @@ void mobile_touch_set_gameplay(bool active, bool descent2)
 		touch_controls.release_all();
 	touch_controls.set_descent2(descent2);
 	touch_gameplay_active = active;
+}
+
+void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window)
+{
+	if (!touch_gameplay_active || !window || std::strcmp(SDL_GetPlatform(), "iOS"))
+		return;
+	const auto previous_fade = canvas.cv_fade_level;
+	const auto white = gr_find_closest_color(63, 63, 63);
+	touch_controls.for_each_button(window, [&](unsigned i, const auto &r, int width, int height, bool pressed) {
+		const auto fade = static_cast<gr_fade_level>(pressed ? 8 : (i >= 13 && i <= 16 ? 28 : 24));
+		gr_settransblend(canvas, fade, gr_blend::normal);
+		const int left = r.x * canvas.cv_bitmap.bm_w / width;
+		const int top = r.y * canvas.cv_bitmap.bm_h / height;
+		const int right = (r.x + r.width) * canvas.cv_bitmap.bm_w / width;
+		const int bottom = (r.y + r.height) * canvas.cv_bitmap.bm_h / height;
+		gr_rect(canvas, left, top, right, bottom, white);
+	});
+	gr_settransblend(canvas, previous_fade, gr_blend::normal);
 }
 #endif
 

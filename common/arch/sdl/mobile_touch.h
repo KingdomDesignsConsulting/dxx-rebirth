@@ -23,6 +23,10 @@ class mobile_touch_controls
 		SDL_Keycode primary, secondary;
 		bool follow_finger;
 	};
+	struct rectangle
+	{
+		float x, y, width, height;
+	};
 
 	static constexpr std::array<button, 25> buttons{{
 		{120, 135, 55, 55, SDLK_a, 0, true},
@@ -104,6 +108,22 @@ class mobile_touch_controls
 				set_key(key, true);
 	}
 
+	rectangle geometry(unsigned i, int width, int height) const
+	{
+		const float scale = std::min(width / 568.f, height / 320.f);
+		const auto &b = buttons[i];
+		float left = (i >= 8 && i <= 12) ? width - (568 - b.x) * scale : b.x * scale;
+		float top = height - (320 - b.y) * scale;
+		if (i >= 17)
+		{
+			const unsigned position = i == 17 ? 0 : i == 20 ? 1 : i == 19 ? 2 :
+				i == 21 ? 3 : i == 22 ? 4 : i == 23 ? 5 : i == 24 ? 6 : descent2 ? 7 : 3;
+			left = 25 * scale + position * (width - 75 * scale) / (descent2 ? 7 : 3);
+			top = 20 * scale;
+		}
+		return {left, top, b.width * scale, b.height * scale};
+	}
+
 	unsigned hit_test(SDL_Window *window, float normalized_x, float normalized_y) const
 	{
 		int width = 0, height = 0;
@@ -111,28 +131,37 @@ class mobile_touch_controls
 			SDL_GetWindowSize(window, &width, &height);
 		if (width <= 0 || height <= 0)
 			return buttons.size();
-		const float scale = std::min(width / 568.f, height / 320.f);
 		const float x = normalized_x * width, y = normalized_y * height;
-		const unsigned count = descent2 ? buttons.size() : 21;
-		for (unsigned i = 0; i != count; ++i)
+		for (unsigned i = 0, count = descent2 ? buttons.size() : 21; i != count; ++i)
 		{
-			const auto &b = buttons[i];
-			float left = (i >= 8 && i <= 12) ? width - (568 - b.x) * scale : b.x * scale;
-			float top = height - (320 - b.y) * scale;
-			if (i >= 17)
-			{
-				const unsigned position = i == 17 ? 0 : i == 20 ? 1 : i == 19 ? 2 :
-					i == 21 ? 3 : i == 22 ? 4 : i == 23 ? 5 : i == 24 ? 6 : descent2 ? 7 : 3;
-				left = 25 * scale + position * (width - 75 * scale) / (descent2 ? 7 : 3);
-				top = 20 * scale;
-			}
-			if (x >= left && x < left + b.width * scale && y >= top && y < top + b.height * scale)
+			const auto r = geometry(i, width, height);
+			if (x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
 				return i;
 		}
 		return buttons.size();
 	}
 
 public:
+	template <typename Callback>
+	void for_each_button(SDL_Window *window, Callback callback) const
+	{
+		int width = 0, height = 0;
+		if (window)
+			SDL_GetWindowSize(window, &width, &height);
+		if (width <= 0 || height <= 0)
+			return;
+		for (unsigned i = 0, count = descent2 ? buttons.size() : 21; i != count; ++i)
+		{
+			bool pressed = false;
+			for (const auto &[finger, index] : fingers)
+			{
+				(void)finger;
+				if (index == i)
+					pressed = true;
+			}
+			callback(i, geometry(i, width, height), width, height, pressed);
+		}
+	}
 	void set_descent2(bool value)
 	{
 		if (descent2 != value)

@@ -30,7 +30,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <stdarg.h>
 #include <ctype.h>
 #include <functional>
+#include <algorithm>
 #include <ranges>
+#include <SDL.h>
 
 #include "pstypes.h"
 #include "dxxerror.h"
@@ -1647,12 +1649,22 @@ window_event_result newmenu::event_handler(const d_event &event)
 			game_flush_inputs(Controls);
 			event_toggle_focus(0);
 			key_toggle_repeat(1);
+#if SDL_MAJOR_VERSION == 2
+			if (!strcmp(SDL_GetPlatform(), "iOS") && std::ranges::any_of(items, [](const newmenu_item &item) {
+				return item.type == nm_type::input || item.type == nm_type::input_menu;
+			}))
+				SDL_StartTextInput();
+#endif
 			break;
 
 		case event_type::window_deactivated:
 			//event_toggle_focus(1);	// No cursor recentering
 			key_toggle_repeat(1);
 			mouse_state = 0;
+#if SDL_MAJOR_VERSION == 2
+			if (!strcmp(SDL_GetPlatform(), "iOS"))
+				SDL_StopTextInput();
+#endif
 			break;
 
 		case event_type::mouse_button_down:
@@ -1672,6 +1684,10 @@ window_event_result newmenu::event_handler(const d_event &event)
 		case event_type::window_draw:
 			return newmenu_draw(this);
 		case event_type::window_close:
+#if SDL_MAJOR_VERSION == 2
+			if (!strcmp(SDL_GetPlatform(), "iOS"))
+				SDL_StopTextInput();
+#endif
 			break;
 		default:
 			break;

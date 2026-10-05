@@ -63,6 +63,7 @@
 #include "gauges.h"
 #include "object.h"
 #include "args.h"
+#include "event.h"
 
 #include "compiler-range_for.h"
 #include "d_levelstate.h"
@@ -1438,6 +1439,9 @@ void gr_flip(void)
 	}
 
 	ogl_do_palfx();
+#if SDL_MAJOR_VERSION == 2
+	mobile_touch_draw_overlay(grd_curscreen->sc_canvas, SDL_GL_GetCurrentWindow());
+#endif
 	ogl_swap_buffers_internal();
 	glClear(GL_COLOR_BUFFER_BIT);
 }

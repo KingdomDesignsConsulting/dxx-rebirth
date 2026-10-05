@@ -21,4 +21,4 @@ python3 scripts/build-ios.py --platform device \
 
 The two apps use separate bundle IDs and preferences. The build bundles the licensed `.hog`, `.pig`, `.ham`, and related files at the app root, and copies tracks 04 onward to `Music/Levels` with a numbered playlist. Track 02 is the title song; track 03 is the briefing song. Rebirth selects these tracks by default when the playlist is present. User music settings saved inside each app remain configurable.
 
-The macOS build continues to use the regular `scons` command. The iOS renderer currently uses OpenGL ES 1.1, which Apple marks as deprecated. The apps have been compiled for simulator and device but not launched in this build pass; runtime graphics, controls, and audio still need device testing.
+The macOS build continues to use the regular `scons` command. The iOS renderer currently uses OpenGL ES 1.1, which Apple marks as deprecated. Both games have reached the pilot-name screen on iPhone and iPad simulators. Gameplay graphics, touch controls, the software keyboard, and audio still need testing on a physical device.

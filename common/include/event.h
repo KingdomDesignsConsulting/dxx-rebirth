@@ -18,8 +18,11 @@
 
 namespace dcx {
 
+struct grs_canvas;
+
 #if SDL_MAJOR_VERSION == 2
 void mobile_touch_set_gameplay(bool active, bool descent2);
+void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window);
 #endif
 
 enum class event_type : uint8_t
