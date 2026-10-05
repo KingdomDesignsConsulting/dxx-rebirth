@@ -146,7 +146,7 @@ class mobile_touch_controls
 		const float scale = std::min(width / 568.f, height / 320.f);
 		const auto &b = buttons[i];
 		float left = (i >= 8 && i <= 12) ? width - (568 - b.x) * scale : b.x * scale;
-		float top = height - (320 - b.y) * scale;
+		float top = height - (320 - (gyro_mode && i == 0 ? 190.f : b.y)) * scale;
 		if (i < 8 || (i >= 13 && i <= 16) || i >= 25)
 			left += std::max(0.f, safe.left + 8.f - 25.f * scale);
 		else if (i >= 8 && i <= 12)

@@ -74,7 +74,32 @@ bool mobile_gyro_get_rates(float (&rates)[3])
 	if (!touch_gameplay_active || !gyro_enabled())
 		return false;
 	SDL_SensorUpdate();
-	return SDL_SensorGetData(gyro_sensor, rates, 3) == 0;
+	float device_rates[3]{};
+	if (SDL_SensorGetData(gyro_sensor, device_rates, 3))
+		return false;
+	// SDL sensor axes stay in the device's portrait orientation.  Convert
+	// pitch and yaw to the current screen axes before applying game controls.
+	switch (SDL_GetDisplayOrientation(0))
+	{
+		case SDL_ORIENTATION_LANDSCAPE:
+			rates[0] = -device_rates[1];
+			rates[1] = device_rates[0];
+			break;
+		case SDL_ORIENTATION_LANDSCAPE_FLIPPED:
+			rates[0] = device_rates[1];
+			rates[1] = -device_rates[0];
+			break;
+		case SDL_ORIENTATION_PORTRAIT_FLIPPED:
+			rates[0] = -device_rates[0];
+			rates[1] = -device_rates[1];
+			break;
+		default:
+			rates[0] = device_rates[0];
+			rates[1] = device_rates[1];
+			break;
+	}
+	rates[2] = device_rates[2];
+	return true;
 }
 
 void mobile_touch_set_intro_skip(bool active)
