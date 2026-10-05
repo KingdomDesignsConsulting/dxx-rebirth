@@ -72,6 +72,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gameseq.h"
 #include "playsave.h"
 #include "timer.h"
+#include "event.h"
 #if DXX_USE_EDITOR
 #include "editor/editor.h"
 #endif
@@ -2216,7 +2217,11 @@ static window_event_result object_move_all(const d_level_shared_robot_info_state
 
 	obj_delete_all_that_should_be_dead();
 
-	if (PlayerCfg.AutoLeveling)
+	if (PlayerCfg.AutoLeveling
+#if SDL_MAJOR_VERSION == 2
+		&& !mobile_gyro_is_active()
+#endif
+	)
 		ConsoleObject->mtype.phys_info.flags |= PF_LEVELLING;
 	else
 		ConsoleObject->mtype.phys_info.flags &= ~PF_LEVELLING;

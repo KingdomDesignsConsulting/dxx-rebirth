@@ -37,6 +37,7 @@
 namespace dcx {
 
 #if SDL_MAJOR_VERSION == 2
+extern SDL_Window *g_pRebirthSDLMainWindow;
 namespace {
 mobile_touch_controls touch_controls;
 bool touch_gameplay_active = false;
@@ -44,6 +45,19 @@ bool touch_intro_active = false;
 bool touch_intro_skipped = false;
 SDL_Sensor *gyro_sensor = nullptr;
 bool gyro_requested = false;
+SDL_DisplayOrientation gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+
+struct mobile_skip_rect { float x, y, width, height; };
+
+mobile_skip_rect intro_skip_geometry(SDL_Window *window)
+{
+	int width = 0, height = 0;
+	SDL_GetWindowSize(window, &width, &height);
+	const float scale = std::min(width / 568.f, height / 320.f);
+	const auto safe = mobile_get_safe_insets(window);
+	return {safe.left + 8 * scale, height - safe.bottom - 34 * scale,
+		96 * scale, 26 * scale};
+}
 
 bool gyro_enabled()
 {
@@ -66,7 +80,14 @@ bool gyro_enabled()
 
 void mobile_gyro_set_requested(bool requested)
 {
+	if (!requested)
+		gyro_orientation = SDL_ORIENTATION_UNKNOWN;
 	gyro_requested = requested;
+}
+
+bool mobile_gyro_is_active()
+{
+	return touch_gameplay_active && gyro_enabled();
 }
 
 bool mobile_gyro_get_rates(float (&rates)[3])
@@ -77,9 +98,20 @@ bool mobile_gyro_get_rates(float (&rates)[3])
 	float device_rates[3]{};
 	if (SDL_SensorGetData(gyro_sensor, device_rates, 3))
 		return false;
-	// SDL sensor axes stay in the device's portrait orientation.  Convert
-	// pitch and yaw to the current screen axes before applying game controls.
-	switch (SDL_GetDisplayOrientation(0))
+	// SDL sensor axes stay in portrait coordinates.  Lock the mapping when
+	// gyro mode starts so tilting the phone cannot swap pitch and yaw mid-turn.
+	if (gyro_orientation == SDL_ORIENTATION_UNKNOWN)
+	{
+		gyro_orientation = SDL_GetDisplayOrientation(0);
+		if (gyro_orientation != SDL_ORIENTATION_LANDSCAPE &&
+			gyro_orientation != SDL_ORIENTATION_LANDSCAPE_FLIPPED)
+		{
+			const auto safe = mobile_get_safe_insets(g_pRebirthSDLMainWindow);
+			gyro_orientation = safe.right > safe.left
+				? SDL_ORIENTATION_LANDSCAPE_FLIPPED : SDL_ORIENTATION_LANDSCAPE;
+		}
+	}
+	switch (gyro_orientation)
 	{
 		case SDL_ORIENTATION_LANDSCAPE:
 			rates[0] = -device_rates[1];
@@ -117,7 +149,10 @@ bool mobile_touch_intro_was_skipped()
 void mobile_touch_set_gameplay(bool active, bool descent2)
 {
 	if (!active)
+	{
 		touch_controls.release_all();
+		gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+	}
 	touch_controls.set_descent2(descent2);
 	touch_gameplay_active = active;
 }
@@ -138,14 +173,21 @@ void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window)
 	const auto white = gr_find_closest_color(63, 63, 63);
 	if (touch_intro_active)
 	{
-		const float scale = std::min(canvas.cv_bitmap.bm_w / 568.f, canvas.cv_bitmap.bm_h / 320.f);
-		const int left = 8 * scale;
-		const int top = canvas.cv_bitmap.bm_h - 34 * scale;
+		int width = 0, height = 0;
+		SDL_GetWindowSize(window, &width, &height);
+		if (width <= 0 || height <= 0)
+			return;
+		const auto skip = intro_skip_geometry(window);
+		const int left = skip.x * canvas.cv_bitmap.bm_w / width;
+		const int top = skip.y * canvas.cv_bitmap.bm_h / height;
+		const int right = (skip.x + skip.width) * canvas.cv_bitmap.bm_w / width;
+		const int bottom = (skip.y + skip.height) * canvas.cv_bitmap.bm_h / height;
 		gr_settransblend(canvas, gr_fade_level{12}, gr_blend::normal);
-		gr_rect(canvas, left, top, left + 96 * scale, top + 26 * scale, white);
+		gr_rect(canvas, left, top, right, bottom, white);
 		gr_settransblend(canvas, previous_fade, gr_blend::normal);
 		gr_set_fontcolor(canvas, white, -1);
-		gr_string(canvas, *GAME_FONT, left + 5 * scale, top + 7 * scale, "SKIP INTRO");
+		gr_string(canvas, *GAME_FONT, left + (right - left - gr_get_string_size(*GAME_FONT, "SKIP INTRO").width) / 2,
+			top + (bottom - top - gr_get_string_size(*GAME_FONT, "SKIP INTRO").height) / 2, "SKIP INTRO");
 		gr_set_fontcolor(canvas, previous_fg, previous_bg);
 		return;
 	}
@@ -182,8 +224,6 @@ struct event_poll_state
 }
 
 #if SDL_MAJOR_VERSION == 2
-extern SDL_Window *g_pRebirthSDLMainWindow;
-
 static void windowevent_handler(const SDL_WindowEvent &windowevent)
 {
 	switch (windowevent.event)
@@ -295,13 +335,13 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 				touch_controls.set_gyro_mode(gyro_enabled());
 				if (touch_intro_active && event.type == SDL_FINGERDOWN)
 				{
+					const auto skip = intro_skip_geometry(g_pRebirthSDLMainWindow);
 					int width = 0, height = 0;
-					SDL_GL_GetDrawableSize(g_pRebirthSDLMainWindow, &width, &height);
-					const float scale = std::min(width / 568.f, height / 320.f);
+					SDL_GetWindowSize(g_pRebirthSDLMainWindow, &width, &height);
 					const float x = event.tfinger.x * width;
 					const float y = event.tfinger.y * height;
-					if (x >= 8 * scale && x < 104 * scale &&
-						y >= height - 34 * scale && y < height - 8 * scale)
+					if (x >= skip.x && x < skip.x + skip.width &&
+						y >= skip.y && y < skip.y + skip.height)
 					{
 						touch_intro_skipped = true;
 						SDL_KeyboardEvent escape{};
