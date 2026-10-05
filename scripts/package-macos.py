@@ -69,7 +69,7 @@ def package_game(game: str, data_root: Path, install_dir: Path | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-root", type=Path, default=ROOT.parent / "Descent-Mobile")
+    parser.add_argument("--data-root", type=Path, default=ROOT / "private assets")
     parser.add_argument("--install-dir", type=Path)
     args = parser.parse_args()
     for game in ("D1", "D2"):

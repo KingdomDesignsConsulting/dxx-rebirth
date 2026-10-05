@@ -24,7 +24,7 @@ The Mac app bundles are built under `build/` and installed to `/Users/knagel/App
 
 ## Licensed data must stay local
 
-Retail game data and ripped music belong to the user and must **not** be committed or pushed. The source folders are in the sibling `Descent-Mobile` directory (`D1`, `D2`, `Music/D1`, and `Music/D2`). The user also placed `D1-Data` and `D2-Data` beside the Mac apps under `dxx-rebirth/build/`. The `/build` and `/build-ios-*` directories are ignored by Git. Before committing, inspect `git status` and the staged filenames; do not use a broad `git add .` if it could include assets. Keep the existing `COPYING.txt` and upstream attribution intact.
+Retail game data, ripped music, and private icon assets belong to the user and must **not** be committed or pushed. The build source is the Git-ignored `private assets` directory in this checkout: `D1`, `D2`, `Music/D1`, `Music/D2`, `Icons/D1/Assets.xcassets`, and `Icons/D2/Assets.xcassets`. `scripts/build-ios.py` and `scripts/package-macos.py` use this directory by default; both accept `--data-root` if the assets are relocated. The user also placed `D1-Data` and `D2-Data` beside the Mac apps under `build/`. The `/build` and `/build-ios-*` directories are ignored by Git. A fresh clone does not include private assets, so keep a separate backup. Before committing, inspect `git status` and the staged filenames; do not use a broad `git add .` if it could include assets. Keep the existing `COPYING.txt` and upstream attribution intact.
 
 ## GitHub authentication and attribution
 

@@ -2,7 +2,7 @@
 
 The Rebirth source tree builds both Descent 1 and Descent 2 for iPhone and iPad. This uses SDL2, PhysicsFS, SDL2_image, and SDL2_mixer as static iOS libraries. The build script downloads pinned releases into `/private/tmp/rebirth-ios-deps`; it does not add those dependencies or licensed game files to Git.
 
-Requirements: Xcode with the iOS SDK, CMake, SCons, pkg-config, and licensed data in the sibling `Descent-Mobile/D1`, `Descent-Mobile/D2`, and `Descent-Mobile/Music/D1` and `D2` folders. Use `--data-root` to choose another data location.
+Requirements: Xcode with the iOS SDK, CMake, SCons, pkg-config, and licensed data in the repository-local, Git-ignored `private assets` folder. It must contain `D1`, `D2`, `Music/D1`, `Music/D2`, `Icons/D1/Assets.xcassets`, and `Icons/D2/Assets.xcassets`. Use `--data-root` to choose another private data location.
 
 From the repository root:
 
@@ -22,6 +22,6 @@ python3 scripts/build-ios.py --platform device \
 
 The two apps use separate bundle IDs and preferences. The build bundles the licensed `.hog`, `.pig`, `.ham`, and related files at the app root, and copies tracks 04 onward to `Music/Levels` with a numbered playlist. Track 02 is the title song; track 03 is the briefing song. Rebirth selects these tracks by default when the playlist is present. User music settings saved inside each app remain configurable.
 
-The build compiles each game's existing `Assets.xcassets/AppIcon.appiconset` from the sibling Descent-Mobile source tree into its app bundle. These icon assets remain outside the Rebirth Git repository.
+The build compiles each game's `Assets.xcassets/AppIcon.appiconset` from `private assets/Icons/D1` or `private assets/Icons/D2` into its app bundle. The private asset folder is ignored by Git and is not available in a fresh clone.
 
 The macOS build continues to use the regular `scons` command. The iOS renderer currently uses OpenGL ES 1.1, which Apple marks as deprecated. Both games have reached the pilot-name screen on iPhone and iPad simulators. Gameplay graphics, touch controls, the software keyboard, and audio still need testing on a physical device.

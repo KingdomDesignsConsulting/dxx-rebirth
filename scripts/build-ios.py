@@ -167,8 +167,7 @@ def bundle_game(build, game, data_root, platform, signing_identity, provisioning
         "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
         "UILaunchScreen": {},
     }
-    icon_source = (data_root / "Descent" / "Assets.xcassets" if game == "D1"
-                   else data_root / "Descent2-Mobile" / "Descent2" / "Assets.xcassets")
+    icon_source = data_root / "Icons" / game / "Assets.xcassets"
     if not (icon_source / "AppIcon.appiconset").is_dir():
         raise RuntimeError(f"Missing {game} app icon catalog: {icon_source}")
     icon_info = build / f"{short}x-icon-info.plist"
@@ -202,7 +201,7 @@ def bundle_game(build, game, data_root, platform, signing_identity, provisioning
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("simulator", "device"), default="simulator")
-    parser.add_argument("--data-root", type=Path, default=ROOT.parent / "Descent-Mobile")
+    parser.add_argument("--data-root", type=Path, default=ROOT / "private assets")
     parser.add_argument("--cache", type=Path, default=Path("/private/tmp/rebirth-ios-deps"))
     parser.add_argument("--signing-identity", help="Apple Development certificate for device installation")
     parser.add_argument("--provisioning-profile-d1", type=Path, help="matching Descent 1 development provisioning profile")

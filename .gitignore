@@ -6,6 +6,7 @@
 *.pyc
 /build
 /build-ios-*/
+/private assets/
 
 # Packages #
 ############
