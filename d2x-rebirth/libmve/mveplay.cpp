@@ -463,7 +463,7 @@ MVESTREAM::handle_result MVESTREAM::handle_mve_segment_startstopaudio()
 MVESTREAM::handle_result MVESTREAM::handle_mve_segment_audioframedata(const mve_opcode major, const unsigned char *data)
 {
 	static const int selected_chan=1;
-	if (const auto mve_audio_spec = this->mve_audio_spec.get())
+	if ([[maybe_unused]] const auto mve_audio_spec = this->mve_audio_spec.get())
 	{
 		const auto chan = get_ushort(data + 2);
 		unsigned nsamp = get_ushort(data + 4);

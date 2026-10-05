@@ -17,7 +17,8 @@
 #if defined(__APPLE__) && defined(__MACH__)
 #include <sys/mount.h>
 #include <unistd.h>	// for chdir hack
-#include <ApplicationServices/ApplicationServices.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <TargetConditionals.h>
 #endif
 
 #include "args.h"
@@ -158,7 +159,8 @@ static void setup_osx_resource_path()
 	CFBundleRef mainBundle = CFBundleGetMainBundle();
 	if (mainBundle)
 	{
-		CFURLRef resourcesURL = CFBundleCopyResourcesDirectoryURL(mainBundle);
+		// iOS stores bundled game data at the app root; macOS uses Contents/Resources.
+		CFURLRef resourcesURL = TARGET_OS_IOS ? CFBundleCopyBundleURL(mainBundle) : CFBundleCopyResourcesDirectoryURL(mainBundle);
 		if (resourcesURL)
 		{
 			char fullPath[PATH_MAX + 5];

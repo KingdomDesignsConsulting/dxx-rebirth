@@ -29,6 +29,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 #include "config.h"
 #include "pstypes.h"
@@ -259,7 +262,19 @@ void ReadConfigFile(CCfg &CGameCfg, Cfg &GameCfg)
 	CGameCfg.CMLevelMusicTrack[1] = -1;
 	CGameCfg.CMLevelMusicPath = {};
 	CGameCfg.CMMiscMusic = {};
-#if defined(__APPLE__) && defined(__MACH__)
+#if defined(__APPLE__) && TARGET_OS_IOS && DXX_USE_SDLMIXER
+	// The iOS bundle supplies the licensed CD tracks in a predictable order.
+	// Keep the built-in music when no tracks were packaged.
+	if (PHYSFS_exists("Music/Levels.m3u"))
+	{
+		CGameCfg.MusicType = music_type::Custom;
+		CGameCfg.CMLevelMusicPlayOrder = LevelMusicPlayOrder::Level;
+		CGameCfg.CMLevelMusicPath = "Music/Levels.m3u";
+		CGameCfg.CMMiscMusic[song_number::title] = "Music/title.mp3";
+		CGameCfg.CMMiscMusic[song_number::briefing] = "Music/briefing.mp3";
+	}
+#endif
+#if defined(__APPLE__) && defined(__MACH__) && !TARGET_OS_IOS
 	CGameCfg.OrigTrackOrder = true;
 	const auto userdir = PHYSFS_getUserDir();
 #if DXX_BUILD_DESCENT == 1

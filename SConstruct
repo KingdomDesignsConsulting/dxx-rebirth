@@ -42,6 +42,7 @@ def get_Werror_sequence(active_cxxflags: list[str], warning_flags: collections.a
 
 host_platform = enum.Enum('host_platform', (
 	'darwin',
+	'ios',
 	'freebsd',
 	'haiku1',
 	'linux',
@@ -1814,7 +1815,7 @@ static void terminate_handler()
 #error "{error_text_opengl_mismatch}"
 #endif
 #endif
-''') if user_settings.opengl else ''
+''') if user_settings.opengl and not user_settings.opengles else ''
 		main = '''
 	SDL_RWops *ops = reinterpret_cast<SDL_RWops *>(argv);
 #if DXX_MAX_JOYSTICKS
@@ -3797,11 +3798,13 @@ class DXXCommon(LazyObjectConstructor):
 			return self.debug
 		# automatic setup for raspberrypi
 		def default_opengles(self):
+			if self.host_platform == host_platform.ios.name:
+				return True
 			if self.raspberrypi in ('yes',):
 				return True
 			return False
 		def default_sdl2(self):
-			if self.raspberrypi in ('mesa',) or self.host_platform == host_platform.darwin.name:
+			if self.raspberrypi in ('mesa',) or self.host_platform in (host_platform.darwin.name, host_platform.ios.name):
 				return True
 			return False
 		@classmethod
@@ -4357,6 +4360,15 @@ class DXXCommon(LazyObjectConstructor):
 					CPPDEFINES = [('GL_SILENCE_DEPRECATION',)],
 					FRAMEWORKS = ['OpenGL'],
 				)
+	class IOSPlatformSettings(_PlatformSettings):
+		tools = ('gcc', 'g++', 'applelink')
+		def adjust_environment(self, program, env):
+			if not self.user_settings.sdl2 or not self.user_settings.opengles:
+				raise SCons.Errors.StopError('iOS requires sdl2=1 and opengles=1.')
+			env.Append(
+				CPPDEFINES = ['__unix__'],
+				FRAMEWORKS = ['UIKit', 'Foundation', 'OpenGLES', 'QuartzCore', 'CoreGraphics', 'ImageIO', 'MobileCoreServices', 'CoreAudio', 'AudioToolbox', 'AVFoundation', 'CoreMotion', 'GameController', 'Metal', 'CoreHaptics', 'CoreBluetooth'],
+			)
 	# Settings to apply to Linux builds
 	class LinuxPlatformSettings(_PlatformSettings):
 		sharepath = '{prefix}/share/games/{program_target}'.format
@@ -4845,6 +4857,8 @@ class DXXCommon(LazyObjectConstructor):
 		match platform_name:
 			case host_platform.darwin:
 				return cls.DarwinPlatformSettings
+			case host_platform.ios:
+				return cls.IOSPlatformSettings
 			case host_platform.haiku1:
 				return cls.HaikuPlatformSettings
 			case host_platform.linux | host_platform.freebsd | host_platform.openbsd:
@@ -5162,6 +5176,10 @@ class DXXArchive(DXXCommon):
 	class DarwinPlatformSettings(DXXCommon.DarwinPlatformSettings):
 		get_platform_objects = LazyObjectConstructor.create_lazy_object_getter((
 			'common/arch/cocoa/messagebox.mm',
+		))
+	class IOSPlatformSettings(DXXCommon.IOSPlatformSettings):
+		get_platform_objects = LazyObjectConstructor.create_lazy_object_getter((
+			'common/arch/sdl/messagebox.cpp',
 		))
 
 	class LinuxPlatformSettings(DXXCommon.LinuxPlatformSettings):
