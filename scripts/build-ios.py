@@ -172,7 +172,19 @@ def bundle_game(build, game, data_root, platform, signing_identity, provisioning
     if provisioning_profile:
         shutil.copy2(provisioning_profile, app / "embedded.mobileprovision")
     if signing_identity:
-        run("codesign", "--force", "--sign", signing_identity, "--timestamp=none", app)
+        profile = subprocess.run(
+            ["openssl", "cms", "-verify", "-inform", "DER", "-noverify", "-in", str(provisioning_profile)],
+            check=True, capture_output=True,
+        )
+        profile_data = plistlib.loads(profile.stdout)
+        entitlements = profile_data["Entitlements"]
+        if not entitlements["application-identifier"].endswith("." + info["CFBundleIdentifier"]):
+            raise RuntimeError(f"Provisioning profile does not match {info['CFBundleIdentifier']}")
+        entitlements_path = build / f"{short}x-entitlements.plist"
+        with entitlements_path.open("wb") as f:
+            plistlib.dump(entitlements, f)
+        run("codesign", "--force", "--sign", signing_identity,
+            "--entitlements", entitlements_path, "--timestamp=none", app)
     print(f"Built {app} ({platform})")
 
 
@@ -182,11 +194,13 @@ def main():
     parser.add_argument("--data-root", type=Path, default=ROOT.parent / "Descent-Mobile")
     parser.add_argument("--cache", type=Path, default=Path("/private/tmp/rebirth-ios-deps"))
     parser.add_argument("--signing-identity", help="Apple Development certificate for device installation")
-    parser.add_argument("--provisioning-profile", type=Path, help="matching device development provisioning profile")
+    parser.add_argument("--provisioning-profile-d1", type=Path, help="matching Descent 1 development provisioning profile")
+    parser.add_argument("--provisioning-profile-d2", type=Path, help="matching Descent 2 development provisioning profile")
     args = parser.parse_args()
-    if args.platform == "device" and bool(args.signing_identity) != bool(args.provisioning_profile):
-        parser.error("device signing requires both --signing-identity and --provisioning-profile")
-    if args.platform == "simulator" and (args.signing_identity or args.provisioning_profile):
+    profiles = {"D1": args.provisioning_profile_d1, "D2": args.provisioning_profile_d2}
+    if args.platform == "device" and (args.signing_identity or any(profiles.values())) and not (args.signing_identity and all(profiles.values())):
+        parser.error("device signing requires --signing-identity and both game provisioning profiles")
+    if args.platform == "simulator" and (args.signing_identity or any(profiles.values())):
         parser.error("simulator bundles do not need device signing")
     cache = args.cache.resolve()
     cache.mkdir(parents=True, exist_ok=True)
@@ -204,7 +218,7 @@ def main():
         "macos_add_frameworks=0", "macos_bundle_libs=0", env=env)
     for game in ("D1", "D2"):
         bundle_game(build, game, args.data_root.resolve(), args.platform,
-                    args.signing_identity, args.provisioning_profile)
+                    args.signing_identity, profiles[game])
 
 
 if __name__ == "__main__":

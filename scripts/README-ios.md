@@ -16,7 +16,8 @@ The results are `build-ios-simulator/D1X-Rebirth.app`, `build-ios-simulator/D2X-
 ```sh
 python3 scripts/build-ios.py --platform device \
   --signing-identity "Apple Development: Your Name (TEAMID)" \
-  --provisioning-profile /path/to/profile.mobileprovision
+  --provisioning-profile-d1 /path/to/d1.mobileprovision \
+  --provisioning-profile-d2 /path/to/d2.mobileprovision
 ```
 
 The two apps use separate bundle IDs and preferences. The build bundles the licensed `.hog`, `.pig`, `.ham`, and related files at the app root, and copies tracks 04 onward to `Music/Levels` with a numbered playlist. Track 02 is the title song; track 03 is the briefing song. Rebirth selects these tracks by default when the playlist is present. User music settings saved inside each app remain configurable.
