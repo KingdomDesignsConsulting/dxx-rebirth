@@ -51,7 +51,9 @@
 #include "config.h"
 #include "vers_id.h"
 
-#if defined(__APPLE__) && defined(__MACH__)
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#include <OpenGLES/ES1/gl.h>
+#elif defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/glu.h>
 #else
 #if DXX_USE_OGLES
@@ -847,6 +849,11 @@ int gr_init()
 #elif SDL_MAJOR_VERSION == 2
 	assert(!g_pRebirthSDLMainWindow);
 	unsigned sdl_window_flags = SDL_WINDOW_OPENGL;
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS && DXX_USE_OGLES
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#endif
 	if (CGameArg.SysNoBorders)
 		sdl_window_flags |= SDL_WINDOW_BORDERLESS;
 	if (!CGameCfg.WindowMode && !CGameArg.SysWindow)

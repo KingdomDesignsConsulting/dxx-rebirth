@@ -19,7 +19,9 @@
 #include <stddef.h>
 #endif
 #include "ogl_init.h"
-#if defined(__APPLE__) && defined(__MACH__)
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#include <OpenGLES/ES1/gl.h>
+#elif defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>
 #include <OpenGL/glu.h>
 #else

@@ -37,7 +37,9 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "d_bit_enum.h"
 
 #if DXX_USE_OGL
-#if defined(__APPLE__) && defined(__MACH__)
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#include <OpenGLES/ES1/gl.h>
+#elif defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>
 #else
 #include <GL/gl.h>
