@@ -12,6 +12,7 @@
  */
 
 #include <ranges>
+#include <cstring>
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,8 +28,26 @@
 #include "joy.h"
 #include "args.h"
 #include "partial_range.h"
+#if SDL_MAJOR_VERSION == 2
+#include "mobile_touch.h"
+#endif
 
 namespace dcx {
+
+#if SDL_MAJOR_VERSION == 2
+namespace {
+mobile_touch_controls touch_controls;
+bool touch_gameplay_active = false;
+}
+
+void mobile_touch_set_gameplay(bool active, bool descent2)
+{
+	if (!active)
+		touch_controls.release_all();
+	touch_controls.set_descent2(descent2);
+	touch_gameplay_active = active;
+}
+#endif
 
 namespace {
 
@@ -147,6 +166,16 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 					continue;
 				result = mouse_motion_handler(&event.motion);
 				break;
+#if SDL_MAJOR_VERSION == 2
+			case SDL_FINGERDOWN:
+			case SDL_FINGERUP:
+			case SDL_FINGERMOTION:
+				if (std::strcmp(SDL_GetPlatform(), "iOS") || !touch_gameplay_active)
+					continue;
+				touch_controls.handle(g_pRebirthSDLMainWindow, event.tfinger);
+				result = window_event_result::handled;
+				break;
+#endif
 #if DXX_MAX_JOYSTICKS
 #if SDL_MAJOR_VERSION == 2
 #if DXX_MAX_BUTTONS_PER_JOYSTICK

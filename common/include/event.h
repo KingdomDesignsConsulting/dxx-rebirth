@@ -18,6 +18,10 @@
 
 namespace dcx {
 
+#if SDL_MAJOR_VERSION == 2
+void mobile_touch_set_gameplay(bool active, bool descent2);
+#endif
+
 enum class event_type : uint8_t
 {
 	idle = 0,

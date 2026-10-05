@@ -468,6 +468,9 @@ int set_screen_mode(int sm)
 #endif
 
 	Screen_mode = sm;
+#if SDL_MAJOR_VERSION == 2
+	mobile_touch_set_gameplay(sm == SCREEN_GAME, DXX_BUILD_DESCENT == 2);
+#endif
 
 #if SDL_MAJOR_VERSION == 1
 	switch( Screen_mode )
