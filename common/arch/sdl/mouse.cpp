@@ -11,6 +11,8 @@
  */
 
 #include <string.h>
+#include <algorithm>
+#include <optional>
 #include <SDL.h>
 
 #include "maths.h"
@@ -43,6 +45,9 @@ struct mouseinfo : flushable_mouseinfo
 };
 
 static mouseinfo Mouse;
+#if SDL_MAJOR_VERSION == 2
+static std::optional<SDL_FingerID> menu_finger;
+#endif
 
 }
 
@@ -54,6 +59,9 @@ d_event_mousebutton::d_event_mousebutton(const event_type etype, const mbtn b) :
 void mouse_init(void)
 {
 	Mouse = {};
+#if SDL_MAJOR_VERSION == 2
+	menu_finger.reset();
+#endif
 }
 
 void mouse_close(void)
@@ -169,11 +177,47 @@ window_event_result mouse_motion_handler(const SDL_MouseMotionEvent *const mme)
 	return event_send(event);
 }
 
+#if SDL_MAJOR_VERSION == 2
+window_event_result mouse_touch_handler(const SDL_TouchFingerEvent &finger, SDL_Window *const window)
+{
+	if (CGameArg.CtlNoMouse || !window)
+		return window_event_result::ignored;
+	if (finger.type == SDL_FINGERDOWN)
+	{
+		if (menu_finger)
+			return window_event_result::handled;
+		menu_finger = finger.fingerId;
+	}
+	else if (!menu_finger || *menu_finger != finger.fingerId)
+		return window_event_result::ignored;
+
+	int width = 0, height = 0;
+	SDL_GL_GetDrawableSize(window, &width, &height);
+	if (width > 0 && height > 0)
+	{
+		Mouse.x = std::clamp(static_cast<int>(finger.x * width), 0, width - 1);
+		Mouse.y = std::clamp(static_cast<int>(finger.y * height), 0, height - 1);
+	}
+	Mouse.cursor_time = timer_query();
+	if (finger.type == SDL_FINGERDOWN)
+		return send_singleclick(true, mbtn::left);
+	if (finger.type == SDL_FINGERUP)
+	{
+		menu_finger.reset();
+		return send_singleclick(false, mbtn::left);
+	}
+	return window_event_result::handled;
+}
+#endif
+
 void mouse_flush()	// clears all mice events...
 {
 //	event_poll();
 	static_cast<flushable_mouseinfo &>(Mouse) = {};
 	SDL_GetMouseState(&Mouse.x, &Mouse.y); // necessary because polling only gives us the delta.
+#if SDL_MAJOR_VERSION == 2
+	menu_finger.reset();
+#endif
 }
 
 //========================================================================

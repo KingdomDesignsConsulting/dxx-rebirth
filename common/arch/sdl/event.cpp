@@ -189,10 +189,15 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 			case SDL_FINGERDOWN:
 			case SDL_FINGERUP:
 			case SDL_FINGERMOTION:
-				if (std::strcmp(SDL_GetPlatform(), "iOS") || !touch_gameplay_active)
+				if (std::strcmp(SDL_GetPlatform(), "iOS"))
 					continue;
-				touch_controls.handle(g_pRebirthSDLMainWindow, event.tfinger);
-				result = window_event_result::handled;
+				if (touch_gameplay_active)
+				{
+					touch_controls.handle(g_pRebirthSDLMainWindow, event.tfinger);
+					result = window_event_result::handled;
+				}
+				else
+					result = mouse_touch_handler(event.tfinger, g_pRebirthSDLMainWindow);
 				break;
 #endif
 #if DXX_MAX_JOYSTICKS

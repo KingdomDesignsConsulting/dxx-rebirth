@@ -22,6 +22,10 @@
 
 struct SDL_MouseButtonEvent;
 struct SDL_MouseMotionEvent;
+#if SDL_MAJOR_VERSION == 2
+struct SDL_TouchFingerEvent;
+struct SDL_Window;
+#endif
 
 namespace dcx {
 
@@ -67,6 +71,9 @@ void mouse_enable_cursor();
 void mouse_disable_cursor();
 window_event_result mouse_button_handler(const SDL_MouseButtonEvent *mbe);
 window_event_result mouse_motion_handler(const SDL_MouseMotionEvent *mme);
+#if SDL_MAJOR_VERSION == 2
+window_event_result mouse_touch_handler(const SDL_TouchFingerEvent &finger, SDL_Window *window);
+#endif
 void mouse_cursor_autohide();
 
 class d_event_mousebutton : public d_event

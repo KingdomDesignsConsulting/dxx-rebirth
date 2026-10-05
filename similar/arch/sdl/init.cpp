@@ -63,6 +63,11 @@ arch_atexit arch_init()
 {
 	int t;
 
+#if SDL_MAJOR_VERSION == 2
+	if (!strcmp(SDL_GetPlatform(), "iOS"))
+		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+#endif
+
 	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 		Error("SDL library initialisation failed: %s.",SDL_GetError());
 #if DXX_USE_SDLIMAGE
