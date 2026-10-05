@@ -26,6 +26,8 @@ The Mac app bundles are built under `build/` and installed to `/Users/knagel/App
 
 Retail game data, ripped music, and private icon assets belong to the user and must **not** be committed or pushed. The build source is the Git-ignored `private assets` directory in this checkout: `D1`, `D2`, `Music/D1`, `Music/D2`, `Icons/D1/Assets.xcassets`, and `Icons/D2/Assets.xcassets`. `scripts/build-ios.py` and `scripts/package-macos.py` use this directory by default; both accept `--data-root` if the assets are relocated. The user also placed `D1-Data` and `D2-Data` beside the Mac apps under `build/`. The `/build` and `/build-ios-*` directories are ignored by Git. A fresh clone does not include private assets, so keep a separate backup. Before committing, inspect `git status` and the staged filenames; do not use a broad `git add .` if it could include assets. Keep the existing `COPYING.txt` and upstream attribution intact.
 
+The former mobile source tree is preserved at `../Descent-Mobile-retired` because its own Git checkout has uncommitted changes. Rebirth builds do not use it. Do not delete that legacy checkout as part of ordinary port work.
+
 ## GitHub authentication and attribution
 
 The Mac's GitHub CLI (`gh`) was authenticated to the user's `KingdomDesignsConsulting` account through its keyring when the fork was created. No GitHub token, password, or credential is stored in this repository. Check access with `gh auth status`. In a restricted tool environment, a GitHub command may fail because network or keyring access is sandboxed; use the normal tool approval/escalation path if available. If authentication has genuinely expired, ask the user to sign in with `gh auth login -h github.com`. Never print, copy into a file, or commit a token.
