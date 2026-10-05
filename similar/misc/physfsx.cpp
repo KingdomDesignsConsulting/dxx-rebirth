@@ -20,6 +20,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <TargetConditionals.h>
 #endif
+#include <filesystem>
 
 #include "args.h"
 #include "newdemo.h"
@@ -154,13 +155,13 @@ static void setup_final_fallback_write_directory(const char *const base_dir)
 }
 
 #if defined(__APPLE__) && defined(__MACH__)
-static void setup_osx_resource_path()
+static void setup_osx_resource_path(const char *const base_dir)
 {
+#if TARGET_OS_IOS
 	CFBundleRef mainBundle = CFBundleGetMainBundle();
 	if (mainBundle)
 	{
-		// iOS stores bundled game data at the app root; macOS uses Contents/Resources.
-		CFURLRef resourcesURL = TARGET_OS_IOS ? CFBundleCopyBundleURL(mainBundle) : CFBundleCopyResourcesDirectoryURL(mainBundle);
+		CFURLRef resourcesURL = CFBundleCopyBundleURL(mainBundle);
 		if (resourcesURL)
 		{
 			char fullPath[PATH_MAX + 5];
@@ -172,6 +173,36 @@ static void setup_osx_resource_path()
 			CFRelease(resourcesURL);
 		}
 	}
+#else
+	// PhysicsFS may report either the .app root or Contents/MacOS as its
+	// base.  Derive the adjacent data folder and Resources from the app path.
+	auto app_bundle = std::filesystem::path{base_dir};
+	if (app_bundle.filename().empty())
+		app_bundle = app_bundle.parent_path();
+	if (app_bundle.filename() == "MacOS" && app_bundle.parent_path().filename() == "Contents")
+		app_bundle = app_bundle.parent_path().parent_path();
+	if (app_bundle.extension() == ".app")
+	{
+		const auto app_dir = app_bundle.parent_path();
+#if DXX_BUILD_DESCENT == 1
+		const auto data_dir = app_dir / "D1-Data";
+#elif DXX_BUILD_DESCENT == 2
+		const auto data_dir = app_dir / "D2-Data";
+#endif
+		const auto resources_dir = app_bundle / "Contents" / "Resources";
+		for (const auto &path : {data_dir, resources_dir})
+		{
+			std::error_code error;
+			if (!std::filesystem::is_directory(path, error))
+				continue;
+			const auto path_string = path.string();
+			if (PHYSFS_mount(path_string.c_str(), nullptr, 1))
+				con_printf(CON_DEBUG, "PHYSFS: append Mac game data directory \"%s\"", path_string.c_str());
+			else
+				con_printf(CON_VERBOSE, "PHYSFS: could not mount \"%s\": %s", path_string.c_str(), PHYSFS_getErrorByCode(PHYSFS_getLastErrorCode()));
+		}
+	}
+#endif
 }
 #endif
 
@@ -217,7 +248,7 @@ bool PHYSFSX_init(int argc, char *argv[])
 	
 	// For Macintosh, add the 'Resources' directory in the .app bundle to the searchpaths
 #if defined(__APPLE__) && defined(__MACH__)
-	setup_osx_resource_path();
+	setup_osx_resource_path(base_dir);
 #endif
 	return true;
 }

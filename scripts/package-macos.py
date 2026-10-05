@@ -42,6 +42,8 @@ def package_game(game: str, data_root: Path, install_dir: Path | None) -> None:
         levels.mkdir(parents=True)
         playlist = []
         for path in tracks:
+            # Existing Mac pilot settings may refer to the original CD filename.
+            shutil.copy2(path, music / path.name)
             if path.name.startswith("02 "):
                 shutil.copy2(path, music / "title.mp3")
             elif path.name.startswith("03 "):

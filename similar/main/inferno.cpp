@@ -498,7 +498,8 @@ static int main(int argc, char *argv[])
 #endif
 #if (defined(__APPLE__) && defined(__MACH__)) || defined(macintosh)
 #define DXX_HOGFILE_APPLICATION_BUNDLE	\
-				  "\tIn 'Resources' inside the application bundle\n"
+				  "\tIn 'Resources' inside the application bundle\n" \
+				  "\tIn D" DXX_NAME_NUMBER "-Data beside the application bundle\n"
 #else
 #define DXX_HOGFILE_APPLICATION_BUNDLE	""
 #endif
