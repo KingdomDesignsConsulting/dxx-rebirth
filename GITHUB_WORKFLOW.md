@@ -6,7 +6,7 @@ This file is for anyone continuing this project in another Codex thread. Read it
 
 - **Our public fork:** <https://github.com/KingdomDesignsConsulting/dxx-rebirth>
 - **Original project:** <https://github.com/dxx-rebirth/dxx-rebirth>
-- **Local source checkout:** `/Users/Shared/Main Hard Drive/My Projects/Projects In Progress/Applications/Games to make/Descent/dxx-rebirth`
+- **Local source checkout:** `/Users/knagel/My Drive/dxx-rebirth` (also reachable through the `Descent` symlink under `Games to make`)
 - **Our port branch:** `codex/ios-port`. This is currently the fork's default branch and tracks `origin/codex/ios-port`.
 - **`origin`:** our fork. Push project work here.
 - **`upstream`:** the original DXX-Rebirth repository. Fetch updates from here; do not push our port directly to it.
@@ -26,7 +26,7 @@ The Mac app bundles are built under `build/` and installed to `/Users/knagel/App
 
 Retail game data, ripped music, and private icon assets belong to the user and must **not** be committed or pushed. The build source is the Git-ignored `private assets` directory in this checkout: `D1`, `D2`, `Music/D1`, `Music/D2`, `Icons/D1/Assets.xcassets`, and `Icons/D2/Assets.xcassets`. `scripts/build-ios.py` and `scripts/package-macos.py` use this directory by default; both accept `--data-root` if the assets are relocated. The user also placed `D1-Data` and `D2-Data` beside the Mac apps under `build/`. The `/build` and `/build-ios-*` directories are ignored by Git. A fresh clone does not include private assets, so keep a separate backup. Before committing, inspect `git status` and the staged filenames; do not use a broad `git add .` if it could include assets. Keep the existing `COPYING.txt` and upstream attribution intact.
 
-The former mobile source tree is preserved at `../Descent-Mobile-retired` because its own Git checkout has uncommitted changes. Rebirth builds do not use it. Do not delete that legacy checkout as part of ordinary port work.
+The former mobile source tree has been retired. Its recovery patches are stored locally in the Git-ignored `private assets/Legacy source recovery` directory. Rebirth builds do not use the old tree.
 
 ## GitHub authentication and attribution
 
