@@ -44,6 +44,8 @@ public:
 	virtual ~window();
 
 	virtual window_event_result event_handler(const d_event &) = 0;
+	virtual bool is_touch_menu() const { return false; }
+	virtual bool dismiss_on_outside_touch() const { return false; }
 
 	void send_creation_events();
 	friend int window_close(window *wind);

@@ -360,6 +360,8 @@ struct newmenu_layout
 
 struct newmenu : newmenu_layout, window, mixin_trackable_window
 {
+	bool is_touch_menu() const override { return true; }
+	bool dismiss_on_outside_touch() const override;
 	using subfunction_type = int(*)(newmenu *menu, const d_event &event, void *userdata);
 	newmenu(const menu_title title, const menu_subtitle subtitle, const menu_filename filename, const tiny_mode_flag tiny_mode, const tab_processing_flag tabs_flag, const adjusted_citem citem_init, grs_canvas &src, const draw_box_flag draw_box = draw_box_flag::menu_background) :
 		newmenu_layout(title, subtitle, filename, src, tiny_mode, tabs_flag, citem_init, draw_box), window(src, x, y, w, h)
@@ -571,6 +573,7 @@ struct messagebox_newmenu final :
 
 struct listbox : listbox_layout, window
 {
+	bool is_touch_menu() const override { return true; }
 	listbox(int citem, unsigned nitems, const char **item, menu_title title, grs_canvas &canvas, uint8_t allow_abort_flag);
 	const uint8_t allow_abort_flag;
 	uint8_t mouse_state{0};

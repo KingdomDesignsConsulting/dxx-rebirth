@@ -28,9 +28,11 @@ class mobile_touch_controls
 		float x, y, width, height;
 	};
 
+	// The legacy layout used A/Z for its central controls.  Rebirth binds
+	// pitch to Up/Down, including the diagonal pitch-and-slide buttons.
 	static constexpr std::array<button, 25> buttons{{
-		{120, 135, 55, 55, SDLK_a, 0, true},
-		{120, 245, 55, 55, SDLK_z, 0, true},
+		{120, 135, 55, 55, SDLK_UP, 0, true},
+		{120, 245, 55, 55, SDLK_DOWN, 0, true},
 		{65, 190, 55, 55, SDLK_KP_1, 0, true},
 		{175, 190, 55, 55, SDLK_KP_3, 0, true},
 		{25, 135, 35, 80, SDLK_KP_MINUS, 0, true},
@@ -42,10 +44,10 @@ class mobile_touch_controls
 		{473, 95, 70, 40, SDLK_1, 0, false},
 		{338, 230, 40, 70, SDLK_6, 0, false},
 		{483, 240, 50, 50, SDLK_f, 0, false},
-		{65, 135, 55, 55, SDLK_a, SDLK_KP_1, true},
-		{175, 135, 55, 55, SDLK_a, SDLK_KP_3, true},
-		{65, 245, 55, 55, SDLK_z, SDLK_KP_1, true},
-		{175, 245, 55, 55, SDLK_z, SDLK_KP_3, true},
+		{65, 135, 55, 55, SDLK_UP, SDLK_KP_1, true},
+		{175, 135, 55, 55, SDLK_UP, SDLK_KP_3, true},
+		{65, 245, 55, 55, SDLK_DOWN, SDLK_KP_1, true},
+		{175, 245, 55, 55, SDLK_DOWN, SDLK_KP_3, true},
 		{25, 20, 25, 25, SDLK_ESCAPE, 0, false},
 		{0, 20, 25, 25, SDLK_TAB, 0, false},
 		{0, 20, 25, 25, SDLK_r, 0, false},

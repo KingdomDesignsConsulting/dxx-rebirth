@@ -53,6 +53,11 @@ void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window)
 {
 	if (!touch_gameplay_active || !window || std::strcmp(SDL_GetPlatform(), "iOS"))
 		return;
+	if (const auto *front = window_get_front(); front && front->is_touch_menu())
+	{
+		touch_controls.release_all();
+		return;
+	}
 	const auto previous_fade = canvas.cv_fade_level;
 	const auto white = gr_find_closest_color(63, 63, 63);
 	touch_controls.for_each_button(window, [&](unsigned i, const auto &r, int width, int height, bool pressed) {
@@ -191,7 +196,34 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 			case SDL_FINGERMOTION:
 				if (std::strcmp(SDL_GetPlatform(), "iOS"))
 					continue;
-				if (touch_gameplay_active)
+				if (const auto *front = window_get_front(); front && front->is_touch_menu())
+				{
+					touch_controls.release_all();
+					if (front->dismiss_on_outside_touch() && event.type == SDL_FINGERDOWN)
+					{
+						int width = 0, height = 0;
+						SDL_GL_GetDrawableSize(g_pRebirthSDLMainWindow, &width, &height);
+						const auto &rect = front->w_canv.cv_bitmap;
+						const auto x = event.tfinger.x * width;
+						const auto y = event.tfinger.y * height;
+						if (x < rect.bm_x || x >= rect.bm_x + rect.bm_w ||
+							y < rect.bm_y || y >= rect.bm_y + rect.bm_h)
+						{
+							SDL_KeyboardEvent escape{};
+							escape.type = SDL_KEYDOWN;
+							escape.state = SDL_PRESSED;
+							escape.keysym.sym = SDLK_ESCAPE;
+							escape.keysym.scancode = SDL_SCANCODE_ESCAPE;
+							result = key_handler(&escape);
+							escape.type = SDL_KEYUP;
+							escape.state = SDL_RELEASED;
+							key_handler(&escape);
+							break;
+						}
+					}
+					result = mouse_touch_handler(event.tfinger, g_pRebirthSDLMainWindow);
+				}
+				else if (touch_gameplay_active)
 				{
 					touch_controls.handle(g_pRebirthSDLMainWindow, event.tfinger);
 					result = window_event_result::handled;
