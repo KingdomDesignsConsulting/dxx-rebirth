@@ -275,7 +275,7 @@ struct start_new_game_menu_items
 	} text_buffer;
 	int &user_chosen_level;
 	const int last_level;
-	std::array<newmenu_item, 2> m;
+	std::array<newmenu_item, 4> m;
 	void update_label(const int requested_level)
 	{
 		cf_assert(requested_level >= 0 && requested_level < MAX_LEVELS_PER_MISSION);
@@ -324,6 +324,8 @@ struct start_new_game_menu_items
 				 * constrain input.
 				 */
 				: newmenu_item{text_buffer.slider_level_label.data(), 0, newmenu_item::nm_item_slider{0, last_level - 1, text_buffer.slider_text}},
+			newmenu_item::nm_item_menu{"GO"},
+			newmenu_item::nm_item_menu{"BACK"},
 		}}
 	{
 	}
@@ -999,17 +1001,18 @@ int select_demo()
 
 static int do_difficulty_menu()
 {
-	using items_type = per_difficulty_level_array<newmenu_item>;
+	using items_type = std::array<newmenu_item, NDL + 1>;
 	struct difficulty_prompt_menu : items_type, passive_newmenu
 	{
 		difficulty_prompt_menu(const Difficulty_level_type Difficulty_level) :
-			items_type{{{
+			items_type{{
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_0)},
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_1)},
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_2)},
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_3)},
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_4)},
-			}}},
+				newmenu_item::nm_item_menu{"BACK"},
+			}},
 			passive_newmenu(menu_title{nullptr}, menu_subtitle{TXT_DIFFICULTY_LEVEL}, menu_filename{nullptr}, tiny_mode_flag::normal, tab_processing_flag::ignore, adjusted_citem::create(*static_cast<items_type *>(this), underlying_value(Difficulty_level)), grd_curscreen->sc_canvas)
 		{
 		}
@@ -1058,6 +1061,8 @@ window_event_result do_new_game_menu(const d_select_event &select_event)
 								update_label(m[1].value);
 							return window_event_result::handled;
 						case event_type::newmenu_selected:
+							if (static_cast<const d_select_event &>(event).citem == 3)
+								return window_event_result::ignored;
 							if (use_text_level_input)
 							{
 								const auto new_level_num{strtoul(text_buffer.user_entered_level_number.data(), nullptr, 10)};
