@@ -2180,7 +2180,10 @@ static void ShowLevelIntro(int level_num)
 		/* Play a level-appropriate briefing, whether built-in, add-on,
 		 * or Descent 1.
 		 */
-		do_briefing_screens(Current_mission->briefing_text_filename, level_num);
+#if SDL_MAJOR_VERSION == 2
+		if (!mobile_touch_intro_was_skipped())
+#endif
+			do_briefing_screens(Current_mission->briefing_text_filename, level_num);
 
 		gr_palette = save_pal;
 	}
@@ -2211,6 +2214,9 @@ static void maybe_set_first_secret_visit(int level_num)
 window_event_result StartNewLevel(int level_num)
 {
 	hide_menus();
+#if SDL_MAJOR_VERSION == 2
+	mobile_touch_set_intro_skip(!(Game_mode & GM_MULTI));
+#endif
 
 	GameTime64 = 0;
 	/* Autosave is permitted immediately on entering a new level */
@@ -2223,9 +2229,15 @@ window_event_result StartNewLevel(int level_num)
 		if (PLAYING_BUILTIN_MISSION && level_num == 1) {
 			if (PlayMovie({}, "briefa.mve", play_movie_warn_missing::verbose) == movie_play_status::started)
 				dominated_by_movie = movie_play_status::started;
-			PlayMovie({}, "briefb.mve", play_movie_warn_missing::verbose);
+#if SDL_MAJOR_VERSION == 2
+			if (!mobile_touch_intro_was_skipped())
+#endif
+				PlayMovie({}, "briefb.mve", play_movie_warn_missing::verbose);
 		}
 		if (dominated_by_movie == movie_play_status::skipped)
+#if SDL_MAJOR_VERSION == 2
+			if (!mobile_touch_intro_was_skipped())
+#endif
 			do_briefing_screens(Current_mission->briefing_text_filename, level_num);
 	}
 #elif DXX_BUILD_DESCENT == 2
@@ -2234,6 +2246,10 @@ window_event_result StartNewLevel(int level_num)
 	}
 
 	ShowLevelIntro(level_num);
+#endif
+
+#if SDL_MAJOR_VERSION == 2
+	mobile_touch_set_intro_skip(false);
 #endif
 
 	return StartNewLevelSub(LevelSharedRobotInfoState.Robot_info, level_num, 1, secret_restore::none);

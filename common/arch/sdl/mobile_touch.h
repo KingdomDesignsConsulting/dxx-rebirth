@@ -29,7 +29,7 @@ class mobile_touch_controls
 	};
 
 	// The legacy layout used A/Z for its central controls.  Rebirth binds
-	// pitch to Up/Down, including the diagonal pitch-and-slide buttons.
+	// pitch to Up/Down.  The four buttons flanking pitch now bank left/right.
 	static constexpr std::array<button, 25> buttons{{
 		{120, 135, 55, 55, SDLK_UP, 0, true},
 		{120, 245, 55, 55, SDLK_DOWN, 0, true},
@@ -37,17 +37,17 @@ class mobile_touch_controls
 		{175, 190, 55, 55, SDLK_KP_3, 0, true},
 		{25, 135, 35, 80, SDLK_KP_MINUS, 0, true},
 		{25, 220, 35, 80, SDLK_KP_PLUS, 0, true},
-		{65, 95, 80, 35, SDLK_q, 0, true},
-		{150, 95, 80, 35, SDLK_e, 0, true},
+		{65, 95, 0, 0, 0, 0, true},
+		{150, 95, 0, 0, 0, 0, true},
 		{473, 150, 70, 70, SDLK_LCTRL, 0, false},
 		{393, 230, 70, 70, SDLK_SPACE, 0, false},
 		{473, 95, 70, 40, SDLK_1, 0, false},
 		{338, 230, 40, 70, SDLK_6, 0, false},
 		{483, 240, 50, 50, SDLK_f, 0, false},
-		{65, 135, 55, 55, SDLK_UP, SDLK_KP_1, true},
-		{175, 135, 55, 55, SDLK_UP, SDLK_KP_3, true},
-		{65, 245, 55, 55, SDLK_DOWN, SDLK_KP_1, true},
-		{175, 245, 55, 55, SDLK_DOWN, SDLK_KP_3, true},
+		{65, 135, 55, 55, SDLK_q, 0, true},
+		{175, 135, 55, 55, SDLK_e, 0, true},
+		{65, 245, 55, 55, SDLK_q, 0, true},
+		{175, 245, 55, 55, SDLK_e, 0, true},
 		{25, 20, 25, 25, SDLK_ESCAPE, 0, false},
 		{0, 20, 25, 25, SDLK_TAB, 0, false},
 		{0, 20, 25, 25, SDLK_r, 0, false},
@@ -61,6 +61,12 @@ class mobile_touch_controls
 	std::unordered_map<SDL_FingerID, unsigned> fingers;
 	std::map<SDL_Keycode, unsigned> held_keys;
 	bool descent2 = false;
+	static constexpr std::array<const char *, 25> labels{{
+		"UP", "DOWN", "SL L", "SL R", "SL U", "SL D", "", "",
+		"FIRE", "MISSILE", "WPN 1", "WPN 6", "FLARE",
+		"ROLL L", "ROLL R", "ROLL L", "ROLL R",
+		"MENU", "MAP", "R", "F3", "H", "T", "F4", "S+F4"
+	}};
 
 	static SDL_KeyboardEvent keyboard_event(SDL_Keycode key, bool down)
 	{
@@ -137,6 +143,8 @@ class mobile_touch_controls
 		for (unsigned i = 0, count = descent2 ? buttons.size() : 21; i != count; ++i)
 		{
 			const auto r = geometry(i, width, height);
+			if (!r.width || !r.height)
+				continue;
 			if (x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
 				return i;
 		}
@@ -154,6 +162,8 @@ public:
 			return;
 		for (unsigned i = 0, count = descent2 ? buttons.size() : 21; i != count; ++i)
 		{
+			if (!buttons[i].width || !buttons[i].height)
+				continue;
 			bool pressed = false;
 			for (const auto &[finger, index] : fingers)
 			{
@@ -164,6 +174,7 @@ public:
 			callback(i, geometry(i, width, height), width, height, pressed);
 		}
 	}
+	const char *label(unsigned i) const { return labels[i]; }
 	void set_descent2(bool value)
 	{
 		if (descent2 != value)

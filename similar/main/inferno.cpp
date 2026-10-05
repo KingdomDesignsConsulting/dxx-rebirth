@@ -784,7 +784,15 @@ int main(int argc, char *argv[])
 	void d_set_exception_handler();
 	d_set_exception_handler();
 #endif
-	return dsx::main(argc, argv);
+	const auto result = dsx::main(argc, argv);
+#if defined(__IPHONEOS__)
+	/* SDL's UIKit delegate deliberately keeps UIApplicationMain running after
+	 * SDL_main returns.  Once the game has cleaned up, end the process so Quit
+	 * does not leave an empty black app window on iOS. */
+	exit(result);
+#else
+	return result;
+#endif
 }
 
 #undef argv

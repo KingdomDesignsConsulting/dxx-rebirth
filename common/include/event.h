@@ -22,6 +22,8 @@ struct grs_canvas;
 
 #if SDL_MAJOR_VERSION == 2
 void mobile_touch_set_gameplay(bool active, bool descent2);
+void mobile_touch_set_intro_skip(bool active);
+bool mobile_touch_intro_was_skipped();
 void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window);
 #endif
 

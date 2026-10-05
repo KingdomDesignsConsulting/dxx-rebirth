@@ -306,6 +306,8 @@ using menu_title = menu_tagged_string<menu_title_tag>;
 using menu_subtitle = menu_tagged_string<menu_subtitle_tag>;
 using menu_filename = menu_tagged_string<menu_filename_tag>;
 
+uint8_t newmenu_visible_rows(const grs_canvas &canvas, menu_title title, menu_subtitle subtitle, tiny_mode_flag tiny_mode);
+
 struct newmenu_layout
 {
 	struct adjusted_citem
@@ -340,7 +342,7 @@ struct newmenu_layout
 		title(title), subtitle(subtitle), filename(filename),
 		parent_canvas(parent_canvas),
 		tiny_mode(tiny_mode), tabs_flag(tabs_flag),
-		max_on_menu(std::min<uint8_t>(citem_init.items.size(), tiny_mode != tiny_mode_flag::normal ? 21u : 14u)),
+		max_on_menu(std::min<uint8_t>(citem_init.items.size(), newmenu_visible_rows(parent_canvas, title, subtitle, tiny_mode))),
 		all_text(citem_init.all_text),
 		is_scroll_box(max_on_menu < citem_init.items.size()),
 		max_displayable(std::min<uint8_t>(max_on_menu, citem_init.items.size())),
@@ -574,6 +576,7 @@ struct messagebox_newmenu final :
 struct listbox : listbox_layout, window
 {
 	bool is_touch_menu() const override { return true; }
+	bool dismiss_on_outside_touch() const override { return allow_abort_flag; }
 	listbox(int citem, unsigned nitems, const char **item, menu_title title, grs_canvas &canvas, uint8_t allow_abort_flag);
 	const uint8_t allow_abort_flag;
 	uint8_t mouse_state{0};

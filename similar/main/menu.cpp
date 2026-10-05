@@ -1004,7 +1004,7 @@ int select_demo()
 
 static int do_difficulty_menu()
 {
-	using items_type = std::array<newmenu_item, NDL + 1>;
+	using items_type = std::array<newmenu_item, NDL + 2>;
 	struct difficulty_prompt_menu : items_type, passive_newmenu
 	{
 		difficulty_prompt_menu(const Difficulty_level_type Difficulty_level) :
@@ -1014,6 +1014,7 @@ static int do_difficulty_menu()
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_2)},
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_3)},
 				newmenu_item::nm_item_menu{MENU_DIFFICULTY_TEXT(Difficulty_level_type::_4)},
+				newmenu_item::nm_item_text{" "},
 				newmenu_item::nm_item_menu{"BACK"},
 			}},
 			passive_newmenu(menu_title{nullptr}, menu_subtitle{TXT_DIFFICULTY_LEVEL}, menu_filename{nullptr}, tiny_mode_flag::normal, tab_processing_flag::ignore, adjusted_citem::create(*static_cast<items_type *>(this), underlying_value(Difficulty_level)), grd_curscreen->sc_canvas)

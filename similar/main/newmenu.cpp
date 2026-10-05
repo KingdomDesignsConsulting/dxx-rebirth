@@ -1546,6 +1546,27 @@ static void set_ios_menu_text_input_rect(const newmenu &menu)
 	};
 	SDL_SetTextInputRect(&rect);
 }
+
+static void update_ios_menu_text_input(newmenu &menu)
+{
+	if (strcmp(SDL_GetPlatform(), "iOS") || window_get_front() != &menu)
+		return;
+	bool editing = false;
+	if (menu.citem >= 0 && static_cast<std::size_t>(menu.citem) < menu.items.size())
+	{
+		auto &item = *std::next(menu.items.begin(), menu.citem);
+		editing = item.type == nm_type::input ||
+			(item.type == nm_type::input_menu && item.imenu().group == 1);
+	}
+	if (editing)
+	{
+		set_ios_menu_text_input_rect(menu);
+		if (!SDL_IsTextInputActive())
+			SDL_StartTextInput();
+	}
+	else if (SDL_IsTextInputActive())
+		SDL_StopTextInput();
+}
 #endif
 
 static window_event_result newmenu_draw(newmenu *menu)
@@ -1679,13 +1700,7 @@ window_event_result newmenu::event_handler(const d_event &event)
 			event_toggle_focus(0);
 			key_toggle_repeat(1);
 #if SDL_MAJOR_VERSION == 2
-			if (!strcmp(SDL_GetPlatform(), "iOS") && std::ranges::any_of(items, [](const newmenu_item &item) {
-				return item.type == nm_type::input || item.type == nm_type::input_menu;
-			}))
-			{
-				set_ios_menu_text_input_rect(*this);
-				SDL_StartTextInput();
-			}
+			update_ios_menu_text_input(*this);
 #endif
 			break;
 
@@ -1704,11 +1719,23 @@ window_event_result newmenu::event_handler(const d_event &event)
 		{
 			mouse_state = event.type == event_type::mouse_button_down;
 			const auto button = event_mouse_get_button(event);
-			return newmenu_mouse(event, this, button);
+			const auto result = newmenu_mouse(event, this, button);
+#if SDL_MAJOR_VERSION == 2
+			if (event.type == event_type::mouse_button_up && result != window_event_result::close && result != window_event_result::deleted)
+				update_ios_menu_text_input(*this);
+#endif
+			return result;
 		}
 
 		case event_type::key_command:
-			return newmenu_key_command(event, this);
+		{
+			const auto result = newmenu_key_command(event, this);
+#if SDL_MAJOR_VERSION == 2
+			if (result != window_event_result::close && result != window_event_result::deleted)
+				update_ios_menu_text_input(*this);
+#endif
+			return result;
+		}
 		case event_type::idle:
 			if (!(Game_mode & GM_MULTI) || !Game_wind || !Game_wind->is_visible())
 				timer_delay2(CGameArg.SysMaxFPS);
@@ -1729,7 +1756,9 @@ window_event_result newmenu::event_handler(const d_event &event)
 
 bool newmenu::dismiss_on_outside_touch() const
 {
-	return subtitle.p && !strcmp(subtitle.p, "Game Menu");
+	return std::ranges::none_of(items, [](const newmenu_item &item) {
+		return item.text && item.type == nm_type::menu && !strncmp(item.text, "BACK", 4);
+	});
 }
 
 int nm_messagebox(const menu_title title, const nm_messagebox_tie &tie, const char *format, ...)
@@ -2016,6 +2045,18 @@ static window_event_result listbox_key_command(const d_event &event, listbox *lb
 }
 
 namespace dcx {
+
+uint8_t newmenu_visible_rows(const grs_canvas &canvas, const menu_title title, const menu_subtitle subtitle, const tiny_mode_flag tiny_mode)
+{
+	const auto &font = *(tiny_mode != tiny_mode_flag::normal ? GAME_FONT : MEDIUM1_FONT);
+	int available_height = canvas.cv_bitmap.bm_h - 2 * get_border_y(canvas) - FSPACY(5);
+	if (title)
+		available_height -= gr_get_string_size(*HUGE_FONT, title).height;
+	if (subtitle)
+		available_height -= gr_get_string_size(*MEDIUM3_FONT, subtitle).height;
+	const int rows = available_height / LINE_SPACING(font, *GAME_FONT);
+	return std::clamp(rows, 5, tiny_mode != tiny_mode_flag::normal ? 21 : 14);
+}
 
 void listbox_layout::create_structure()
 {

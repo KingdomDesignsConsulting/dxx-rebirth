@@ -25,6 +25,7 @@
 #include "config.h"
 #include "inferno.h"
 #include "gr.h"
+#include "gamefont.h"
 
 #include "joy.h"
 #include "args.h"
@@ -39,6 +40,20 @@ namespace dcx {
 namespace {
 mobile_touch_controls touch_controls;
 bool touch_gameplay_active = false;
+bool touch_intro_active = false;
+bool touch_intro_skipped = false;
+}
+
+void mobile_touch_set_intro_skip(bool active)
+{
+	touch_intro_active = active;
+	if (active)
+		touch_intro_skipped = false;
+}
+
+bool mobile_touch_intro_was_skipped()
+{
+	return touch_intro_skipped;
 }
 
 void mobile_touch_set_gameplay(bool active, bool descent2)
@@ -51,15 +66,30 @@ void mobile_touch_set_gameplay(bool active, bool descent2)
 
 void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window)
 {
-	if (!touch_gameplay_active || !window || std::strcmp(SDL_GetPlatform(), "iOS"))
+	if (!window || std::strcmp(SDL_GetPlatform(), "iOS") || (!touch_gameplay_active && !touch_intro_active))
 		return;
-	if (const auto *front = window_get_front(); front && front->is_touch_menu())
+	if (const auto *front = window_get_front(); !touch_intro_active && front && front->is_touch_menu())
 	{
 		touch_controls.release_all();
 		return;
 	}
 	const auto previous_fade = canvas.cv_fade_level;
+	const auto previous_fg = canvas.cv_font_fg_color;
+	const auto previous_bg = canvas.cv_font_bg_color;
 	const auto white = gr_find_closest_color(63, 63, 63);
+	if (touch_intro_active)
+	{
+		const float scale = std::min(canvas.cv_bitmap.bm_w / 568.f, canvas.cv_bitmap.bm_h / 320.f);
+		const int left = 8 * scale;
+		const int top = canvas.cv_bitmap.bm_h - 34 * scale;
+		gr_settransblend(canvas, gr_fade_level{12}, gr_blend::normal);
+		gr_rect(canvas, left, top, left + 96 * scale, top + 26 * scale, white);
+		gr_settransblend(canvas, previous_fade, gr_blend::normal);
+		gr_set_fontcolor(canvas, white, -1);
+		gr_string(canvas, *GAME_FONT, left + 5 * scale, top + 7 * scale, "SKIP INTRO");
+		gr_set_fontcolor(canvas, previous_fg, previous_bg);
+		return;
+	}
 	touch_controls.for_each_button(window, [&](unsigned i, const auto &r, int width, int height, bool pressed) {
 		const auto fade = static_cast<gr_fade_level>(pressed ? 8 : (i >= 13 && i <= 16 ? 28 : 24));
 		gr_settransblend(canvas, fade, gr_blend::normal);
@@ -68,8 +98,15 @@ void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window)
 		const int right = (r.x + r.width) * canvas.cv_bitmap.bm_w / width;
 		const int bottom = (r.y + r.height) * canvas.cv_bitmap.bm_h / height;
 		gr_rect(canvas, left, top, right, bottom, white);
+		gr_settransblend(canvas, previous_fade, gr_blend::normal);
+		const char *const label = touch_controls.label(i);
+		const int label_width = gr_get_string_size(*GAME_FONT, label).width;
+		gr_set_fontcolor(canvas, white, -1);
+		gr_string(canvas, *GAME_FONT, left + (right - left - label_width) / 2,
+			top + (bottom - top - gr_get_string_size(*GAME_FONT, label).height) / 2, label);
 	});
 	gr_settransblend(canvas, previous_fade, gr_blend::normal);
+	gr_set_fontcolor(canvas, previous_fg, previous_bg);
 }
 #endif
 
@@ -196,6 +233,29 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 			case SDL_FINGERMOTION:
 				if (std::strcmp(SDL_GetPlatform(), "iOS"))
 					continue;
+				if (touch_intro_active && event.type == SDL_FINGERDOWN)
+				{
+					int width = 0, height = 0;
+					SDL_GL_GetDrawableSize(g_pRebirthSDLMainWindow, &width, &height);
+					const float scale = std::min(width / 568.f, height / 320.f);
+					const float x = event.tfinger.x * width;
+					const float y = event.tfinger.y * height;
+					if (x >= 8 * scale && x < 104 * scale &&
+						y >= height - 34 * scale && y < height - 8 * scale)
+					{
+						touch_intro_skipped = true;
+						SDL_KeyboardEvent escape{};
+						escape.type = SDL_KEYDOWN;
+						escape.state = SDL_PRESSED;
+						escape.keysym.sym = SDLK_ESCAPE;
+						escape.keysym.scancode = SDL_SCANCODE_ESCAPE;
+						result = key_handler(&escape);
+						escape.type = SDL_KEYUP;
+						escape.state = SDL_RELEASED;
+						key_handler(&escape);
+						break;
+					}
+				}
 				if (const auto *front = window_get_front(); front && front->is_touch_menu())
 				{
 					touch_controls.release_all();
