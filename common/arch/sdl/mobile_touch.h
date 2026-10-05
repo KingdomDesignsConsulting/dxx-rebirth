@@ -34,8 +34,8 @@ class mobile_touch_controls
 	static constexpr std::array<button, 27> buttons{{
 		{120, 135, 55, 55, SDLK_UP, 0, true},
 		{120, 245, 55, 55, SDLK_DOWN, 0, true},
-		{65, 190, 55, 55, SDLK_q, 0, true},
-		{175, 190, 55, 55, SDLK_e, 0, true},
+		{65, 190, 55, 55, SDLK_LEFT, 0, true},
+		{175, 190, 55, 55, SDLK_RIGHT, 0, true},
 		{25, 135, 35, 80, SDLK_KP_MINUS, 0, true},
 		{25, 220, 35, 80, SDLK_KP_PLUS, 0, true},
 		{65, 95, 0, 0, 0, 0, true},
@@ -45,8 +45,8 @@ class mobile_touch_controls
 		{473, 95, 70, 40, SDLK_1, 0, false},
 		{338, 230, 40, 70, SDLK_6, 0, false},
 		{483, 240, 50, 50, SDLK_f, 0, false},
-		{65, 135, 55, 55, SDLK_LEFT, 0, true},
-		{175, 135, 55, 55, SDLK_RIGHT, 0, true},
+		{65, 135, 55, 55, SDLK_q, 0, true},
+		{175, 135, 55, 55, SDLK_e, 0, true},
 		{65, 245, 55, 55, SDLK_KP_1, 0, true},
 		{175, 245, 55, 55, SDLK_KP_3, 0, true},
 		{25, 20, 25, 25, SDLK_ESCAPE, 0, false},
@@ -68,7 +68,7 @@ class mobile_touch_controls
 	static constexpr std::array<const char *, 27> labels{{
 		"UP", "DOWN", "TW L", "TW R", "SL U", "SL D", "", "",
 		"FIRE", "MISSILE", "WPN 1", "WPN 6", "FLARE",
-		"LEFT", "RIGHT", "SL L", "SL R",
+		"ROLL L", "ROLL R", "SL L", "SL R",
 		"MENU", "MAP", "R", "F3", "H", "T", "F4", "GB", "FWD", "BACK"
 	}};
 	static constexpr std::array<const char *, 27> gyro_labels{{
