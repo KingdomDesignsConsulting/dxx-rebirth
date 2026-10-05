@@ -1523,6 +1523,31 @@ static void newmenu_create_structure(newmenu_layout &menu, const grs_font &cv_fo
 	menu.fntscaley = FNTScaleY;
 }
 
+#if SDL_MAJOR_VERSION == 2
+static void set_ios_menu_text_input_rect(const newmenu &menu)
+{
+	if (strcmp(SDL_GetPlatform(), "iOS"))
+		return;
+	auto *const window = SDL_GL_GetCurrentWindow();
+	if (!window)
+		return;
+	int width = 0, height = 0;
+	SDL_GetWindowSize(window, &width, &height);
+	const auto &canvas = menu.parent_canvas.cv_bitmap;
+	if (width <= 0 || height <= 0 || !canvas.bm_w || !canvas.bm_h)
+		return;
+	// SDL's iOS keyboard handler moves the view until this rectangle is above
+	// the keyboard.  Include the whole dialog so the name field stays visible.
+	const SDL_Rect rect{
+		menu.x * width / canvas.bm_w,
+		menu.y * height / canvas.bm_h,
+		std::max(1, menu.w * width / canvas.bm_w),
+		std::max(1, menu.h * height / canvas.bm_h),
+	};
+	SDL_SetTextInputRect(&rect);
+}
+#endif
+
 static window_event_result newmenu_draw(newmenu *menu)
 {
 	auto &menu_canvas = menu->w_canv;
@@ -1532,6 +1557,10 @@ static window_event_result newmenu_draw(newmenu *menu)
 	if (menu->swidth != SWIDTH || menu->sheight != SHEIGHT || menu->fntscalex != FNTScaleX || menu->fntscaley != FNTScaleY)
 	{
 		menu->create_structure();
+#if SDL_MAJOR_VERSION == 2
+		if (SDL_IsTextInputActive())
+			set_ios_menu_text_input_rect(*menu);
+#endif
 		{
 			gr_init_sub_canvas(menu_canvas, scrn_canvas, menu->x, menu->y, menu->w, menu->h);
 		}
@@ -1653,7 +1682,10 @@ window_event_result newmenu::event_handler(const d_event &event)
 			if (!strcmp(SDL_GetPlatform(), "iOS") && std::ranges::any_of(items, [](const newmenu_item &item) {
 				return item.type == nm_type::input || item.type == nm_type::input_menu;
 			}))
+			{
+				set_ios_menu_text_input_rect(*this);
 				SDL_StartTextInput();
+			}
 #endif
 			break;
 
