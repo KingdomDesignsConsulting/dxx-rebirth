@@ -167,6 +167,17 @@ def bundle_game(build, game, data_root, platform, signing_identity, provisioning
         "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
         "UILaunchScreen": {},
     }
+    icon_source = (data_root / "Descent" / "Assets.xcassets" if game == "D1"
+                   else data_root / "Descent2-Mobile" / "Descent2" / "Assets.xcassets")
+    if not (icon_source / "AppIcon.appiconset").is_dir():
+        raise RuntimeError(f"Missing {game} app icon catalog: {icon_source}")
+    icon_info = build / f"{short}x-icon-info.plist"
+    run("xcrun", "actool", "--compile", app,
+        "--platform", "iphonesimulator" if platform == "simulator" else "iphoneos",
+        "--minimum-deployment-target", "15.0", "--target-device", "iphone",
+        "--target-device", "ipad", "--app-icon", "AppIcon",
+        "--output-partial-info-plist", icon_info, icon_source)
+    info.update(plistlib.loads(icon_info.read_bytes()))
     with (app / "Info.plist").open("wb") as f:
         plistlib.dump(info, f)
     if provisioning_profile:
