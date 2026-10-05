@@ -25,6 +25,8 @@ void mobile_touch_set_gameplay(bool active, bool descent2);
 void mobile_touch_set_intro_skip(bool active);
 bool mobile_touch_intro_was_skipped();
 void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window);
+bool mobile_gyro_get_rates(float (&rates)[3]);
+void mobile_gyro_set_requested(bool requested);
 #endif
 
 enum class event_type : uint8_t

@@ -42,6 +42,39 @@ mobile_touch_controls touch_controls;
 bool touch_gameplay_active = false;
 bool touch_intro_active = false;
 bool touch_intro_skipped = false;
+SDL_Sensor *gyro_sensor = nullptr;
+bool gyro_requested = false;
+
+bool gyro_enabled()
+{
+	if (std::strcmp(SDL_GetPlatform(), "iOS") || !gyro_requested)
+		return false;
+	if (!gyro_sensor)
+	{
+		if (!(SDL_WasInit(SDL_INIT_SENSOR) & SDL_INIT_SENSOR) && SDL_InitSubSystem(SDL_INIT_SENSOR))
+			return false;
+		for (int i = 0; i < SDL_NumSensors(); ++i)
+			if (SDL_SensorGetDeviceType(i) == SDL_SENSOR_GYRO)
+			{
+				gyro_sensor = SDL_SensorOpen(i);
+				break;
+			}
+	}
+	return gyro_sensor != nullptr;
+}
+}
+
+void mobile_gyro_set_requested(bool requested)
+{
+	gyro_requested = requested;
+}
+
+bool mobile_gyro_get_rates(float (&rates)[3])
+{
+	if (!touch_gameplay_active || !gyro_enabled())
+		return false;
+	SDL_SensorUpdate();
+	return SDL_SensorGetData(gyro_sensor, rates, 3) == 0;
 }
 
 void mobile_touch_set_intro_skip(bool active)
@@ -73,6 +106,7 @@ void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window)
 		touch_controls.release_all();
 		return;
 	}
+	touch_controls.set_gyro_mode(gyro_enabled());
 	const auto previous_fade = canvas.cv_fade_level;
 	const auto previous_fg = canvas.cv_font_fg_color;
 	const auto previous_bg = canvas.cv_font_bg_color;
@@ -233,6 +267,7 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 			case SDL_FINGERMOTION:
 				if (std::strcmp(SDL_GetPlatform(), "iOS"))
 					continue;
+				touch_controls.set_gyro_mode(gyro_enabled());
 				if (touch_intro_active && event.type == SDL_FINGERDOWN)
 				{
 					int width = 0, height = 0;

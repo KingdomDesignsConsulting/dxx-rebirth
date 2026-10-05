@@ -473,20 +473,21 @@ static int MakeNewPlayerFile(int allow_abort)
 
 	for (;;)
 	{
-		using items_type = std::array<newmenu_item, 2>;
+		using items_type = std::array<newmenu_item, 3>;
 		struct pilot_name_menu : items_type, passive_newmenu
 		{
 			pilot_name_menu(grs_canvas &canvas, callsign_t &text, const bool allow_abort) :
 				items_type{{
 					newmenu_item::nm_item_input(text.a, playername_allowed_chars),
+					newmenu_item::nm_item_text{" "},
 					newmenu_item::nm_item_menu{"CANCEL"},
 				}},
-				passive_newmenu(menu_title{nullptr}, menu_subtitle{TXT_ENTER_PILOT_NAME}, menu_filename{nullptr}, tiny_mode_flag::normal, tab_processing_flag::ignore, adjusted_citem::create(partial_range(*static_cast<items_type *>(this), allow_abort ? std::size_t{2} : std::size_t{1}), 0), canvas)
+				passive_newmenu(menu_title{nullptr}, menu_subtitle{TXT_ENTER_PILOT_NAME}, menu_filename{nullptr}, tiny_mode_flag::normal, tab_processing_flag::ignore, adjusted_citem::create(partial_range(*static_cast<items_type *>(this), allow_abort ? std::size_t{3} : std::size_t{1}), 0), canvas)
 			{
 			}
 		};
 		const auto x = run_blocking_newmenu<pilot_name_menu>(*grd_curcanv, text, allow_abort);
-		if (allow_abort && x == 1)
+		if (allow_abort && x == 2)
 			return 0;
 		const char *const name = text;
 		if (x < 0 || !*name)

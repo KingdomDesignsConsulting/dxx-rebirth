@@ -56,6 +56,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "args.h"
 #include "playsave.h"
 #include "screens.h"
+#include "event.h"
 
 #include "d_array.h"
 #include "d_enumerate.h"
@@ -2031,6 +2032,21 @@ void kconfig_end_loop(control_info &Controls, const fix frametime)
 	}
 
 	//----------- Clamp values between -FrameTime and FrameTime
+	// On iOS, "Use mouse" selects the gyroscope.  Angular velocity drives
+	// pitch, heading and bank while the touch pad handles translation.
+#if SDL_MAJOR_VERSION == 2
+	mobile_gyro_set_requested(PlayerCfg.ControlType & CONTROL_USING_MOUSE);
+	float gyro_rates[3]{};
+	if (mobile_gyro_get_rates(gyro_rates))
+	{
+		const auto gyro_time = [frametime](float rate) {
+			return static_cast<fix>(frametime * std::clamp(rate / 1.5f, -1.f, 1.f));
+		};
+		Controls.pitch_time += gyro_time(-gyro_rates[0]);
+		Controls.heading_time += gyro_time(gyro_rates[1]);
+		Controls.bank_time += gyro_time(gyro_rates[2]);
+	}
+#endif
 	clamp_kconfig_control_with_overrun(Controls.vertical_thrust_time, frametime, Controls.excess_vertical_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::slide_ud]);
 	clamp_kconfig_control_with_overrun(Controls.sideways_thrust_time, frametime, Controls.excess_sideways_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::slide_lr]);
 	clamp_kconfig_control_with_overrun(Controls.forward_thrust_time, frametime, Controls.excess_forward_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::throttle]);

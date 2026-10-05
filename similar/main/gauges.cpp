@@ -64,11 +64,34 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "vclip.h"
 #include "compiler-range_for.h"
 #include "d_levelstate.h"
+#if SDL_MAJOR_VERSION == 2
+#include "mobile_safe_area.h"
+#endif
 #include <utility>
 
 using std::min;
 
 namespace {
+
+struct hud_safe_margins { int left{}, right{}; };
+
+static hud_safe_margins get_hud_safe_margins(const grs_canvas &canvas)
+{
+#if SDL_MAJOR_VERSION == 2
+	if (auto *const window = SDL_GL_GetCurrentWindow())
+	{
+		int width = 0, height = 0;
+		SDL_GetWindowSize(window, &width, &height);
+		if (width > 0)
+		{
+			const auto safe = dcx::mobile_get_safe_insets(window);
+			const auto ratio = static_cast<float>(canvas.cv_bitmap.bm_w) / width;
+			return {static_cast<int>(safe.left * ratio), static_cast<int>(safe.right * ratio)};
+		}
+	}
+#endif
+	return {};
+}
 
 enum class gauge_screen_resolution : uint8_t
 {
@@ -988,7 +1011,8 @@ static void hud_show_score(grs_canvas &canvas, const player_info &player_info, c
 
 	auto &game_font = *GAME_FONT;
 	const auto &&[w, h] = gr_get_string_size(game_font, score_str);
-	gr_string(canvas, game_font, canvas.cv_bitmap.bm_w - w - FSPACX(1), FSPACY(1), score_str, w, h);
+	const auto safe = get_hud_safe_margins(canvas);
+	gr_string(canvas, game_font, canvas.cv_bitmap.bm_w - w - FSPACX(1) - safe.right, FSPACY(1), score_str, w, h);
 }
 
 static void hud_show_timer_count(grs_canvas &canvas, const game_mode_flags Game_mode)
@@ -1980,9 +2004,9 @@ static void hud_show_lives(const hud_draw_context_hs_mr hudctx, const hud_ar_sca
 	if (Newdemo_state == ND_STATE_PLAYBACK)
 		return;
 
-	const int x = (PlayerCfg.CockpitMode[1] == cockpit_mode_t::full_cockpit)
+	const int x = get_hud_safe_margins(hudctx.canvas).left + ((PlayerCfg.CockpitMode[1] == cockpit_mode_t::full_cockpit)
 		? static_cast<int>(hudctx.xscale(7))
-		: static_cast<int>(FSPACX(2));
+		: static_cast<int>(FSPACX(2)));
 
 	auto &canvas = hudctx.canvas;
 	auto &game_font = *GAME_FONT;
