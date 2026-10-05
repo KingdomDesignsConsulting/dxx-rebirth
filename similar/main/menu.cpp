@@ -324,8 +324,8 @@ struct start_new_game_menu_items
 				 * constrain input.
 				 */
 				: newmenu_item{text_buffer.slider_level_label.data(), 0, newmenu_item::nm_item_slider{0, last_level - 1, text_buffer.slider_text}},
-			newmenu_item::nm_item_menu{"GO"},
-			newmenu_item::nm_item_menu{"BACK"},
+			newmenu_item::nm_item_text{" "},
+			newmenu_item::nm_item_menu{"BACK\tGO"},
 		}}
 	{
 	}
@@ -1061,8 +1061,16 @@ window_event_result do_new_game_menu(const d_select_event &select_event)
 								update_label(m[1].value);
 							return window_event_result::handled;
 						case event_type::newmenu_selected:
-							if (static_cast<const d_select_event &>(event).citem == 3)
-								return window_event_result::ignored;
+							if (const auto &selection = static_cast<const d_select_event &>(event);
+								selection.citem == 3 && selection.src == d_event::source::mouse)
+							{
+								const auto [mouse_x, mouse_y, mouse_z] = mouse_get_pos();
+								(void)mouse_y;
+								(void)mouse_z;
+								const auto midpoint = w_canv.cv_bitmap.bm_x + m[3].x + m[3].w / 2;
+								if (mouse_x < midpoint)
+									return window_event_result::ignored;
+							}
 							if (use_text_level_input)
 							{
 								const auto new_level_num{strtoul(text_buffer.user_entered_level_number.data(), nullptr, 10)};
