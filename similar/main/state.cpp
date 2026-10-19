@@ -28,6 +28,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <math.h>
 #include <string.h>
 #include <ranges>
+#include <string>
+#include <cstdint>
+#include <filesystem>
+#include <system_error>
 
 #include "pstypes.h"
 #include "digi.h"
@@ -888,11 +892,11 @@ static void state_player_rw_to_player(const player_rw *pl_rw, player *pl, player
 	pl->hours_total               = pl_rw->hours_total;
 }
 
-static void state_write_player(PHYSFS_File *fp, const player &pl, const relocated_player_data &rpd, const player_info &pl_info)
+static bool state_write_player(PHYSFS_File *fp, const player &pl, const relocated_player_data &rpd, const player_info &pl_info)
 {
 	player_rw pl_rw;
 	state_player_to_player_rw(rpd, &pl, &pl_rw, pl_info);
-	PHYSFSX_writeBytes(fp, &pl_rw, sizeof(pl_rw));
+	return PHYSFSX_writeBytes(fp, &pl_rw, sizeof(pl_rw)) == sizeof(pl_rw);
 }
 
 static void state_read_player(PHYSFS_File *fp, player &pl, const physfsx_endian swap, player_info &pl_info, relocated_player_data &rpd)
@@ -1309,7 +1313,8 @@ int state_save_all_sub(const char *filename, const char *desc)
 		Int3();
 	#endif
 
-	auto &&[fp, physfserr] = PHYSFSX_openWriteBuffered(filename);
+	const std::string temporary_filename = std::string(filename) + ".tmp";
+	auto &&[fp, physfserr] = PHYSFSX_openWriteBuffered(temporary_filename.c_str());
 	if (!fp)
 	{
 		const auto errstr = PHYSFS_getErrorByCode(physfserr);
@@ -1333,26 +1338,49 @@ int state_save_all_sub(const char *filename, const char *desc)
 		return 0;
 	}
 
+	PHYSFS_sint64 expected_length = -1;
+	bool write_failed = false;
+	try
+	{
+	const auto write_checked = [&](const void *data, const std::size_t bytes) {
+		if (PHYSFS_writeBytes(fp, data, bytes) != static_cast<PHYSFS_sint64>(bytes))
+			write_failed = true;
+	};
+	const auto write_u32_checked = [&](uint32_t v) {
+		if (!PHYSFS_writeULE32(fp, v))
+			write_failed = true;
+	};
+	/* Legacy sub-serializers return void and can silently ignore short writes.
+	 * Clear PhysicsFS's thread-local error before each call and capture it
+	 * immediately afterward.  Never commit the temporary file after any
+	 * detected nested serialization failure. */
+	const auto write_nested_checked = [&](auto &&serialize) {
+		(void)PHYSFS_getLastErrorCode();
+		serialize();
+		if (PHYSFS_getLastErrorCode() != PHYSFS_ERR_OK)
+			write_failed = true;
+	};
+
 	pause_game_world_time p;
 
 //Save id
-	PHYSFSX_writeBytes(fp, dgss_id, sizeof(char) * 4);
+	write_checked(dgss_id, sizeof(char) * 4);
 
 //Save version
 	{
 		const int i = STATE_VERSION;
-		PHYSFSX_writeBytes(fp, &i, sizeof(int));
+		write_checked(&i, sizeof(int));
 	}
 
 // Save Coop state_game_id and this Player's callsign. Oh the redundancy... we have this one later on but Coop games want to read this before loading a state so for easy access save this here, too
 	if (+(Game_mode & GM_MULTI_COOP))
 	{
-		PHYSFSX_writeBytes(fp, &state_game_id, sizeof(unsigned));
-		PHYSFSX_writeBytes(fp, &get_local_player().callsign, sizeof(char) * CALLSIGN_LEN + 1);
+		write_checked(&state_game_id, sizeof(unsigned));
+		write_checked(&get_local_player().callsign, sizeof(char) * CALLSIGN_LEN + 1);
 	}
 
 //Save description
-	PHYSFSX_writeBytes(fp, desc, 20);
+	write_checked(desc, 20);
 
 // Save the current screen shot...
 
@@ -1385,16 +1413,16 @@ int state_save_all_sub(const char *filename, const char *desc)
 #endif
 		}
 
-		PHYSFSX_writeBytes(fp, cnv->cv_bitmap.bm_data, THUMBNAIL_W * THUMBNAIL_H);
+		write_checked(cnv->cv_bitmap.bm_data, THUMBNAIL_W * THUMBNAIL_H);
 #if DXX_BUILD_DESCENT == 2
-		PHYSFSX_writeBytes(fp, gr_palette.data(), sizeof(gr_palette[0]) * gr_palette.size());
+		write_checked(gr_palette.data(), sizeof(gr_palette[0]) * gr_palette.size());
 #endif
 	}
 
 // Save the Between levels flag...
 	{
 		const int i = 0;
-		PHYSFSX_writeBytes(fp, &i, sizeof(int));
+		write_checked(&i, sizeof(int));
 	}
 
 // Save the mission info...
@@ -1406,48 +1434,49 @@ int state_save_all_sub(const char *filename, const char *desc)
 	auto Current_mission_pathname = Current_mission->path.c_str();
 	// Current_mission_filename is not necessarily 9 bytes long so for saving we use a proper string - preventing corruptions
 	snprintf(mission_pathname.full.data(), mission_pathname.full.size(), "%s", Current_mission_pathname);
-	PHYSFSX_writeBytes(fp, &mission_pathname, sizeof(mission_pathname));
+	write_checked(&mission_pathname, sizeof(mission_pathname));
 
 //Save level info
-	PHYSFSX_writeBytes(fp, &Current_level_num, sizeof(int));
-	PHYSFS_writeULE32(fp, 0);
+	write_checked(&Current_level_num, sizeof(int));
+	write_u32_checked(0);
 
 //Save GameTime
 // NOTE: GameTime now is GameTime64 with fix64 since GameTime could only last 9 hrs. To even help old Savegames, we do not increment Savegame version but rather RESET GameTime64 to 0 on every save! ALL variables based on GameTime64 now will get the current GameTime64 value substracted and saved to fix size as well.
 	tmptime32 = 0;
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
+	write_checked(&tmptime32, sizeof(fix));
 
 //Save player info
 	const auto &plrobj = get_local_plrobj();
 	auto &player_info = plrobj.ctype.player_info;
-	state_write_player(fp, get_local_player(), relocated_player_data{
+	if (!state_write_player(fp, get_local_player(), relocated_player_data{
 		plrobj.shields,
 		static_cast<int16_t>(LevelUniqueObjectState.accumulated_robots),
 		static_cast<int16_t>(GameUniqueState.accumulated_robots),
 		static_cast<uint16_t>(GameUniqueState.total_hostages),
 		static_cast<uint8_t>(LevelUniqueObjectState.total_hostages)
-		}, player_info);
+		}, player_info))
+		write_failed = true;
 
 // Save the current weapon info
 	{
 		const int8_t v = static_cast<int8_t>(player_info.Primary_weapon.get_active());
-		PHYSFSX_writeBytes(fp, &v, sizeof(int8_t));
+		write_checked(&v, sizeof(int8_t));
 	}
 	{
 		const int8_t v = static_cast<int8_t>(player_info.Secondary_weapon.get_active());
-		PHYSFSX_writeBytes(fp, &v, sizeof(int8_t));
+		write_checked(&v, sizeof(int8_t));
 	}
 
 // Save the difficulty level
 	{
 		const int Difficulty_level = underlying_value(GameUniqueState.Difficulty_level);
-		PHYSFSX_writeBytes(fp, &Difficulty_level, sizeof(int));
+		write_checked(&Difficulty_level, sizeof(int));
 	}
 
 // Save cheats enabled
-	PHYSFS_writeULE32(fp, cheats.enabled ? UINT32_MAX : 0);
+	write_u32_checked(cheats.enabled ? UINT32_MAX : 0);
 #if DXX_BUILD_DESCENT == 1
-	PHYSFS_writeULE32(fp, cheats.turbo ? UINT32_MAX : 0);
+	write_u32_checked(cheats.turbo ? UINT32_MAX : 0);
 #endif
 
 //Finish all morph objects
@@ -1475,7 +1504,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 //Save object info
 	{
 		const int i = Highest_object_index+1;
-		PHYSFSX_writeBytes(fp, &i, sizeof(int));
+		write_checked(&i, sizeof(int));
 	}
 	{
 		object_rw None{};
@@ -1483,7 +1512,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 		for (auto &obj : vcobjptr)
 		{
 			object_rw obj_rw;
-			PHYSFSX_writeBytes(fp, obj.type == object_type::OBJ_NONE ? &None : (state_object_to_object_rw(obj, &obj_rw), &obj_rw), sizeof(obj_rw));
+			write_checked(obj.type == object_type::OBJ_NONE ? &None : (state_object_to_object_rw(obj, &obj_rw), &obj_rw), sizeof(obj_rw));
 		}
 	}
 	
@@ -1493,14 +1522,14 @@ int state_save_all_sub(const char *filename, const char *desc)
 		auto &vcwallptr = Walls.vcptr;
 	{
 		const int i = Walls.get_count();
-		PHYSFSX_writeBytes(fp, &i, sizeof(int));
+		write_checked(&i, sizeof(int));
 	}
 	for (auto &w : vcwallptr)
-		little_endian::wall_write(fp, w, 0x7fff);
+		write_nested_checked([&] { little_endian::wall_write(fp, w, 0x7fff); });
 
 #if DXX_BUILD_DESCENT == 2
 //Save exploding wall info
-	native_endian::expl_wall_write(Walls.vmptr, fp);
+	write_nested_checked([&] { native_endian::expl_wall_write(Walls.vmptr, fp); });
 #endif
 	}
 
@@ -1509,10 +1538,10 @@ int state_save_all_sub(const char *filename, const char *desc)
 		auto &ActiveDoors = LevelUniqueWallSubsystemState.ActiveDoors;
 	{
 		const int i = ActiveDoors.get_count();
-		PHYSFSX_writeBytes(fp, &i, sizeof(int));
+		write_checked(&i, sizeof(int));
 	}
 		for (auto &ad : ActiveDoors.vcptr)
-			::dcx::little_endian::active_door_write(fp, ad);
+			write_nested_checked([&] { ::dcx::little_endian::active_door_write(fp, ad); });
 	}
 
 #if DXX_BUILD_DESCENT == 2
@@ -1521,10 +1550,10 @@ int state_save_all_sub(const char *filename, const char *desc)
 		auto &CloakingWalls = LevelUniqueWallSubsystemState.CloakingWalls;
 	{
 		const int i = CloakingWalls.get_count();
-		PHYSFSX_writeBytes(fp, &i, sizeof(int));
+		write_checked(&i, sizeof(int));
 	}
 		for (auto &w : CloakingWalls.vcptr)
-			little_endian::cloaking_wall_write(w, fp);
+			write_nested_checked([&] { little_endian::cloaking_wall_write(w, fp); });
 	}
 #endif
 
@@ -1533,10 +1562,10 @@ int state_save_all_sub(const char *filename, const char *desc)
 		auto &Triggers = LevelUniqueWallSubsystemState.Triggers;
 	{
 		unsigned num_triggers = Triggers.get_count();
-		PHYSFSX_writeBytes(fp, &num_triggers, sizeof(int));
+		write_checked(&num_triggers, sizeof(int));
 	}
 		for (auto &vt : Triggers.vcptr)
-			little_endian::trigger_write(fp, vt);
+			write_nested_checked([&] { little_endian::trigger_write(fp, vt); });
 	}
 
 //Save tmap info
@@ -1544,33 +1573,33 @@ int state_save_all_sub(const char *filename, const char *desc)
 	{
 		for (auto &&[ss, us] : zip(seg.shared_segment::sides, seg.unique_segment::sides))	// d_zip
 		{
-			::dcx::native_endian::segment_side_wall_tmap_write(fp, ss, us);
+			write_nested_checked([&] { ::dcx::native_endian::segment_side_wall_tmap_write(fp, ss, us); });
 		}
 	}
 
 // Save the fuelcen info
 	{
 		const int Control_center_destroyed = LevelUniqueControlCenterState.Control_center_destroyed;
-		PHYSFSX_writeBytes(fp, &Control_center_destroyed, sizeof(int));
+		write_checked(&Control_center_destroyed, sizeof(int));
 	}
 #if DXX_BUILD_DESCENT == 1
-	PHYSFSX_writeBytes(fp, &LevelUniqueControlCenterState.Countdown_seconds_left, sizeof(int));
+	write_checked(&LevelUniqueControlCenterState.Countdown_seconds_left, sizeof(int));
 #elif DXX_BUILD_DESCENT == 2
-	PHYSFSX_writeBytes(fp, &LevelUniqueControlCenterState.Countdown_timer, sizeof(int));
+	write_checked(&LevelUniqueControlCenterState.Countdown_timer, sizeof(int));
 #endif
 	const unsigned Num_robot_centers = LevelSharedRobotcenterState.Num_robot_centers;
-	PHYSFSX_writeBytes(fp, &Num_robot_centers, sizeof(int));
+	write_checked(&Num_robot_centers, sizeof(int));
 	range_for (auto &r, partial_const_range(RobotCenters, Num_robot_centers))
 	{
 #if DXX_BUILD_DESCENT == 1
-		little_endian::matcen_info_write(fp, r, STATE_MATCEN_VERSION);
+		write_nested_checked([&] { little_endian::matcen_info_write(fp, r, STATE_MATCEN_VERSION); });
 #elif DXX_BUILD_DESCENT == 2
-		little_endian::matcen_info_write(fp, r, 0x7f);
+		write_nested_checked([&] { little_endian::matcen_info_write(fp, r, 0x7f); });
 #endif
 	}
-	::dcx::little_endian::control_center_triggers_write(ControlCenterTriggers, fp);
+	write_nested_checked([&] { ::dcx::little_endian::control_center_triggers_write(ControlCenterTriggers, fp); });
 	const auto Num_fuelcenters = LevelUniqueFuelcenterState.Num_fuelcenters;
-	PHYSFSX_writeBytes(fp, &Num_fuelcenters, sizeof(int));
+	write_checked(&Num_fuelcenters, sizeof(int));
 	range_for (auto &s, partial_range(Station, Num_fuelcenters))
 	{
 #if DXX_BUILD_DESCENT == 1
@@ -1578,46 +1607,46 @@ int state_save_all_sub(const char *filename, const char *desc)
 		if (s.Type == segment_special::controlcen)
 			s.Timer = LevelUniqueControlCenterState.Countdown_timer;
 #endif
-		::dcx::little_endian::fuelcen_write(fp, s);
+		write_nested_checked([&] { ::dcx::little_endian::fuelcen_write(fp, s); });
 	}
 
 // Save the control cen info
 	{
 		const int Control_center_been_hit = LevelUniqueControlCenterState.Control_center_been_hit;
-		PHYSFSX_writeBytes(fp, &Control_center_been_hit, sizeof(int));
+		write_checked(&Control_center_been_hit, sizeof(int));
 	}
 	{
 		const auto cc = static_cast<int>(LevelUniqueControlCenterState.Control_center_player_been_seen);
-		PHYSFSX_writeBytes(fp, &cc, sizeof(int));
+		write_checked(&cc, sizeof(int));
 	}
-	PHYSFSX_writeBytes(fp, &LevelUniqueControlCenterState.Frametime_until_next_fire, sizeof(int));
+	write_checked(&LevelUniqueControlCenterState.Frametime_until_next_fire, sizeof(int));
 	{
 		const int Control_center_present = LevelUniqueControlCenterState.Control_center_present;
-		PHYSFSX_writeBytes(fp, &Control_center_present, sizeof(int));
+		write_checked(&Control_center_present, sizeof(int));
 	}
 	{
 		const auto Dead_controlcen_object_num = LevelUniqueControlCenterState.Dead_controlcen_object_num;
 	int dead_controlcen_object_num = Dead_controlcen_object_num == object_none ? -1 : Dead_controlcen_object_num;
-		PHYSFSX_writeBytes(fp, &dead_controlcen_object_num, sizeof(int));
+		write_checked(&dead_controlcen_object_num, sizeof(int));
 	}
 
 // Save the AI state
-	ai_save_state( fp );
+	write_nested_checked([&] { ai_save_state( fp ); });
 
 // Save the automap visited info
-	PHYSFSX_writeBytes(fp, LevelUniqueAutomapState.Automap_visited.data(), std::max<std::size_t>(Highest_segment_index + 1, MAX_SEGMENTS_ORIGINAL));
+	write_checked(LevelUniqueAutomapState.Automap_visited.data(), std::max<std::size_t>(Highest_segment_index + 1, MAX_SEGMENTS_ORIGINAL));
 
-	PHYSFSX_writeBytes(fp, &state_game_id, sizeof(unsigned));
+	write_checked(&state_game_id, sizeof(unsigned));
 	{
-	PHYSFS_writeULE32(fp, cheats.rapidfire ? UINT32_MAX : 0);
+	write_u32_checked(cheats.rapidfire ? UINT32_MAX : 0);
 #if DXX_BUILD_DESCENT == 1
-	PHYSFS_writeULE32(fp, 0); // was Ugly_robot_cheat
-	PHYSFS_writeULE32(fp, 0); // was Ugly_robot_texture
-	PHYSFS_writeULE32(fp, cheats.ghostphysics ? UINT32_MAX : 0);
+	write_u32_checked(0); // was Ugly_robot_cheat
+	write_u32_checked(0); // was Ugly_robot_texture
+	write_u32_checked(cheats.ghostphysics ? UINT32_MAX : 0);
 #endif
-	PHYSFS_writeULE32(fp, 0); // was Lunacy
+	write_u32_checked(0); // was Lunacy
 #if DXX_BUILD_DESCENT == 2
-	PHYSFS_writeULE32(fp, 0); // was Lunacy, too... and one was Ugly robot stuff a long time ago...
+	write_u32_checked(0); // was Lunacy, too... and one was Ugly robot stuff a long time ago...
 
 	// Save automap marker info
 
@@ -1625,13 +1654,13 @@ int state_save_all_sub(const char *filename, const char *desc)
 	{
 		if (m == object_none)
 			m = -1;
-		PHYSFSX_writeBytes(fp, &m, sizeof(m));
+		write_checked(&m, sizeof(m));
 	}
-	PHYSFS_seek(fp, PHYSFS_tell(fp) + (NUM_MARKERS)*(CALLSIGN_LEN+1)); // MarkerOwner is obsolete
+	if (!PHYSFS_seek(fp, PHYSFS_tell(fp) + (NUM_MARKERS)*(CALLSIGN_LEN+1))) write_failed = true; // MarkerOwner is obsolete
 	range_for (const auto &m, MarkerState.message)
-		PHYSFSX_writeBytes(fp, m.data(), m.size());
+		write_checked(m.data(), m.size());
 
-	PHYSFSX_writeBytes(fp, &Afterburner_charge, sizeof(fix));
+	write_checked(&Afterburner_charge, sizeof(fix));
 
 	//save last was super information
 	{
@@ -1649,7 +1678,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 			if (Primary_last_was_super & HAS_PRIMARY_FLAG(primary_weapon_index{j}))
 				last_was_super[j] = 1;
 		}
-		PHYSFSX_writeBytes(fp, &last_was_super, MAX_PRIMARY_WEAPONS);
+		write_checked(&last_was_super, MAX_PRIMARY_WEAPONS);
 	}
 	{
 		auto &Secondary_last_was_super = player_info.Secondary_last_was_super;
@@ -1659,19 +1688,19 @@ int state_save_all_sub(const char *filename, const char *desc)
 			if (Secondary_last_was_super & HAS_SECONDARY_FLAG(secondary_weapon_index{j}))
 				last_was_super[j] = 1;
 		}
-		PHYSFSX_writeBytes(fp, &last_was_super, MAX_SECONDARY_WEAPONS);
+		write_checked(&last_was_super, MAX_SECONDARY_WEAPONS);
 	}
 
 	//	Save flash effect stuff
-	PHYSFSX_writeBytes(fp, &Flash_effect, sizeof(int));
+	write_checked(&Flash_effect, sizeof(int));
 	if (Time_flash_last_played - GameTime64 < F1_0*(-18000))
 		tmptime32 = F1_0*(-18000);
 	else
 		tmptime32 = Time_flash_last_played - GameTime64;
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
-	PHYSFSX_writeBytes(fp, &PaletteRedAdd, sizeof(int));
-	PHYSFSX_writeBytes(fp, &PaletteGreenAdd, sizeof(int));
-	PHYSFSX_writeBytes(fp, &PaletteBlueAdd, sizeof(int));
+	write_checked(&tmptime32, sizeof(fix));
+	write_checked(&PaletteRedAdd, sizeof(int));
+	write_checked(&PaletteGreenAdd, sizeof(int));
+	write_checked(&PaletteBlueAdd, sizeof(int));
 	{
 		union {
 			std::array<uint8_t, MAX_SEGMENTS> light_subtracted;
@@ -1696,11 +1725,11 @@ int state_save_all_sub(const char *filename, const char *desc)
 		auto j = light_subtracted.begin();
 		for (const unique_segment &useg : r)
 			*j++ = underlying_value(useg.light_subtracted);
-		PHYSFSX_writeBytes(fp, light_subtracted.data(), count);
+		write_checked(light_subtracted.data(), count);
 	}
-	PHYSFSX_writeBytes(fp, &First_secret_visit, sizeof(First_secret_visit));
+	write_checked(&First_secret_visit, sizeof(First_secret_visit));
 	auto &Omega_charge = player_info.Omega_charge;
-	PHYSFSX_writeBytes(fp, &Omega_charge, sizeof(Omega_charge));
+	write_checked(&Omega_charge, sizeof(Omega_charge));
 #endif
 	}
 
@@ -1716,17 +1745,61 @@ int state_save_all_sub(const char *filename, const char *desc)
 		// I know, I know we only allow 4 players in coop. I screwed that up. But if we ever allow 8 players in coop, who's gonna laugh then?
 		range_for (auto &i, partial_const_range(Players, MAX_PLAYERS))
 		{
-			state_write_player(fp, i, rpd, player_info);
+			if (!state_write_player(fp, i, rpd, player_info))
+				write_failed = true;
 		}
-		PHYSFSX_writeBytes(fp, Netgame.mission_title.data(), Netgame.mission_title.size());
-		PHYSFSX_writeBytes(fp, Netgame.mission_name.data(), Netgame.mission_name.size());
-		PHYSFSX_writeBytes(fp, &Netgame.levelnum, sizeof(int));
-		PHYSFSX_writeBytes(fp, &Netgame.difficulty, sizeof(ubyte));
-		PHYSFSX_writeBytes(fp, &Netgame.game_status, sizeof(ubyte));
-		PHYSFSX_writeBytes(fp, &Netgame.numplayers, sizeof(ubyte));
-		PHYSFSX_writeBytes(fp, &Netgame.max_numplayers, sizeof(ubyte));
-		PHYSFSX_writeBytes(fp, &Netgame.numconnected, sizeof(ubyte));
-		PHYSFSX_writeBytes(fp, &Netgame.level_time, sizeof(int));
+		write_checked(Netgame.mission_title.data(), Netgame.mission_title.size());
+		write_checked(Netgame.mission_name.data(), Netgame.mission_name.size());
+		write_checked(&Netgame.levelnum, sizeof(int));
+		write_checked(&Netgame.difficulty, sizeof(ubyte));
+		write_checked(&Netgame.game_status, sizeof(ubyte));
+		write_checked(&Netgame.numplayers, sizeof(ubyte));
+		write_checked(&Netgame.max_numplayers, sizeof(ubyte));
+		write_checked(&Netgame.numconnected, sizeof(ubyte));
+		write_checked(&Netgame.level_time, sizeof(int));
+	}
+		expected_length = PHYSFS_tell(fp);
+	}
+	catch (...)
+	{
+		/* Never commit a partial save if a nested serializer throws. */
+		(void)fp.close();
+		PHYSFS_delete(temporary_filename.c_str());
+		con_printf(CON_URGENT, "Savegame serialization threw: %s (old save preserved)", filename);
+		return 0;
+	}
+	if (!fp.close())
+		write_failed = true;
+	if (write_failed)
+	{
+		PHYSFS_delete(temporary_filename.c_str());
+		con_printf(CON_URGENT, "Savegame write failed: %s (old save preserved)", filename);
+		return 0;
+	}
+	const char *const write_dir = PHYSFS_getWriteDir();
+	if (!write_dir)
+	{
+		PHYSFS_delete(temporary_filename.c_str());
+		return 0;
+	}
+	const std::string destination = std::string(write_dir) + "/" + filename;
+	const std::string temporary = std::string(write_dir) + "/" + temporary_filename;
+	/* A buffered PhysicsFS write may return a positive short count without
+	 * setting an error, and PHYSFS_close may still succeed.  Check the
+	 * finalized physical file length independently before replacement. */
+	std::error_code size_error;
+	const auto physical_length = std::filesystem::file_size(temporary, size_error);
+	if (expected_length < 0 || size_error || physical_length != static_cast<std::uintmax_t>(expected_length))
+	{
+		PHYSFS_delete(temporary_filename.c_str());
+		con_printf(CON_URGENT, "Savegame size mismatch: %s (old save preserved)", filename);
+		return 0;
+	}
+	if (std::rename(temporary.c_str(), destination.c_str()) != 0)
+	{
+		PHYSFS_delete(temporary_filename.c_str());
+		con_printf(CON_URGENT, "Failed to replace savegame %s (old save preserved)", filename);
+		return 0;
 	}
 	return 1;
 }
