@@ -23,6 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include <stdexcept>
 #include <algorithm>
 #include <numeric>
 #include <random>
@@ -1777,8 +1778,12 @@ namespace native_endian {
 
 void expl_wall_write(fvcwallptr &vcwallptr, PHYSFS_File *const fp)
 {
+	const auto checked_write = [&](const auto *data, const std::size_t count) {
+		if (PHYSFSX_writeBytes(fp, data, count) != count)
+			throw std::runtime_error("Exploding wall save short write");
+	};
 	const unsigned num_exploding_walls{Num_exploding_walls};
-	PHYSFSX_writeBytes(fp, &num_exploding_walls, sizeof(unsigned));
+	checked_write( &num_exploding_walls, sizeof(unsigned));
 	for (auto &e : vcwallptr)
 	{
 		if (!(e.flags & wall_flag::exploding))
@@ -1787,7 +1792,7 @@ void expl_wall_write(fvcwallptr &vcwallptr, PHYSFS_File *const fp)
 		d.segnum = e.segnum;
 		d.sidenum = underlying_value(e.sidenum);
 		d.time = e.explode_time_elapsed;
-		PHYSFSX_writeBytes(fp, &d, sizeof(d));
+		checked_write( &d, sizeof(d));
 	}
 }
 
