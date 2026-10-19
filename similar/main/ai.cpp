@@ -28,6 +28,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <stdio.h>
 #include <time.h>
 #include <optional>
+#include <stdexcept>
 
 #include "inferno.h"
 #include "game.h"
@@ -4762,6 +4763,12 @@ namespace dsx {
 
 void ai_save_state(PHYSFS_File *fp)
 {
+	/* A positive short write need not set a PhysicsFS error.  Throw to
+	 * abort the outer staged-save transaction before it can commit. */
+	const auto checked_write = [&](const auto *data, const std::size_t count) {
+		if (PHYSFSX_writeBytes(fp, data, count) != count)
+			throw std::runtime_error("AI save short write");
+	};
 	auto &BossUniqueState = LevelUniqueObjectState.BossState;
 #if DXX_BUILD_DESCENT == 2
 	auto &Boss_gate_segs = LevelSharedBossState.Gate_segs;
@@ -4772,47 +4779,47 @@ void ai_save_state(PHYSFS_File *fp)
 	fix tmptime32{0};
 
 	const int Ai_initialized = 0;
-	PHYSFSX_writeBytes(fp, &Ai_initialized, sizeof(int));
-	PHYSFSX_writeBytes(fp, &Overall_agitation, sizeof(int));
+	checked_write( &Ai_initialized, sizeof(int));
+	checked_write( &Overall_agitation, sizeof(int));
 	{
 		ai_local_rw zero{};
 		range_for (const auto &i, Objects)
 		{
 			ai_local_rw ail_rw;
-			PHYSFSX_writeBytes(fp, i.type == object_type::OBJ_ROBOT ? (state_ai_local_to_ai_local_rw(&i.ctype.ai_info.ail, &ail_rw), &ail_rw) : &zero, sizeof(ail_rw));
+			checked_write( i.type == object_type::OBJ_ROBOT ? (state_ai_local_to_ai_local_rw(&i.ctype.ai_info.ail, &ail_rw), &ail_rw) : &zero, sizeof(ail_rw));
 		}
 	}
 	PHYSFSX_serialize_write(fp, Point_segs);
-	//PHYSFSX_writeBytes(fp, Ai_cloak_info, sizeof(ai_cloak_info) * MAX_AI_CLOAK_INFO);
+	// PHYSFSX_writeBytes(fp, Ai_cloak_info, sizeof(ai_cloak_info) * MAX_AI_CLOAK_INFO);
 	range_for (auto &i, Ai_cloak_info)
 	{
 		ai_cloak_info_rw aic_rw;
 		state_ai_cloak_info_to_ai_cloak_info_rw(&i, &aic_rw);
-		PHYSFSX_writeBytes(fp, &aic_rw, sizeof(aic_rw));
+		checked_write( &aic_rw, sizeof(aic_rw));
 	}
 	const auto gametime{GameTime64};
 	{
 		const auto Boss_cloak_start_time = BossUniqueState.Boss_cloak_start_time;
 		tmptime32 = build_savegametime_from_gametime(gametime, Boss_cloak_start_time);
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
+	checked_write( &tmptime32, sizeof(fix));
 		tmptime32 = build_savegametime_from_gametime(gametime, Boss_cloak_start_time + Boss_cloak_duration);
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
+	checked_write( &tmptime32, sizeof(fix));
 	}
 	{
 		const auto Last_teleport_time = BossUniqueState.Last_teleport_time;
 		tmptime32 = build_savegametime_from_gametime(gametime, Last_teleport_time);
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
+	checked_write( &tmptime32, sizeof(fix));
 	}
 	{
 		const fix Boss_teleport_interval = LevelSharedBossState.Boss_teleport_interval;
-		PHYSFSX_writeBytes(fp, &Boss_teleport_interval, sizeof(fix));
+		checked_write( &Boss_teleport_interval, sizeof(fix));
 		const fix Boss_cloak_interval = LevelSharedBossState.Boss_cloak_interval;
-		PHYSFSX_writeBytes(fp, &Boss_cloak_interval, sizeof(fix));
+		checked_write( &Boss_cloak_interval, sizeof(fix));
 	}
-	PHYSFSX_writeBytes(fp, &Boss_cloak_duration, sizeof(fix));
+	checked_write( &Boss_cloak_duration, sizeof(fix));
 	tmptime32 = build_savegametime_from_gametime(gametime, BossUniqueState.Last_gate_time);
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
-	PHYSFSX_writeBytes(fp, &GameUniqueState.Boss_gate_interval, sizeof(fix));
+	checked_write( &tmptime32, sizeof(fix));
+	checked_write( &GameUniqueState.Boss_gate_interval, sizeof(fix));
 	{
 		const auto Boss_dying_start_time = BossUniqueState.Boss_dying_start_time;
 	if (Boss_dying_start_time == 0) // if Boss not dead, yet we expect this to be 0, so do not convert!
@@ -4825,52 +4832,53 @@ void ai_save_state(PHYSFS_File *fp)
 		if (tmptime32 == 0) // now if our converted value went 0 we should do something against it
 			tmptime32 = -1;
 	}
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
+	checked_write( &tmptime32, sizeof(fix));
 	}
 	{
 	const int boss_dying = BossUniqueState.Boss_dying;
-	PHYSFSX_writeBytes(fp, &boss_dying, sizeof(int));
+	checked_write( &boss_dying, sizeof(int));
 	}
 	const int boss_dying_sound_playing = BossUniqueState.Boss_dying_sound_playing;
-	PHYSFSX_writeBytes(fp, &boss_dying_sound_playing, sizeof(int));
+	checked_write( &boss_dying_sound_playing, sizeof(int));
 #if DXX_BUILD_DESCENT == 1
 	const int boss_hit_this_frame = BossUniqueState.Boss_hit_this_frame;
-	PHYSFSX_writeBytes(fp, &boss_hit_this_frame, sizeof(int));
+	checked_write( &boss_hit_this_frame, sizeof(int));
 	const int Boss_been_hit = 0;
-	PHYSFSX_writeBytes(fp, &Boss_been_hit, sizeof(int));
+	checked_write( &Boss_been_hit, sizeof(int));
 #elif DXX_BUILD_DESCENT == 2
 	tmptime32 = build_savegametime_from_gametime(gametime, BossUniqueState.Boss_hit_time);
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
-	PHYSFS_writeSLE32(fp, -1);
+	checked_write( &tmptime32, sizeof(fix));
+	if (!PHYSFS_writeSLE32(fp, -1))
+		throw std::runtime_error("AI save integer write failed");
 	tmptime32 = build_savegametime_from_gametime(gametime, BuddyState.Escort_last_path_created);
-	PHYSFSX_writeBytes(fp, &tmptime32, sizeof(fix));
+	checked_write( &tmptime32, sizeof(fix));
 	{
 		const uint32_t Escort_goal_object = BuddyState.Escort_goal_object;
-	PHYSFSX_writeBytes(fp, &Escort_goal_object, sizeof(Escort_goal_object));
+	checked_write( &Escort_goal_object, sizeof(Escort_goal_object));
 	}
 	{
 		const uint32_t Escort_special_goal = BuddyState.Escort_special_goal;
-	PHYSFSX_writeBytes(fp, &Escort_special_goal, sizeof(Escort_special_goal));
+	checked_write( &Escort_special_goal, sizeof(Escort_special_goal));
 	}
 	{
 		const int egi = BuddyState.Escort_goal_reachable == d_unique_buddy_state::Escort_goal_reachability::unreachable ? -2 : BuddyState.Escort_goal_objidx.get_unchecked_index();
-		PHYSFSX_writeBytes(fp, &egi, sizeof(int));
+		checked_write( &egi, sizeof(int));
 	}
 	{
 		auto &Stolen_items = LevelUniqueObjectState.ThiefState.Stolen_items;
-		PHYSFSX_writeBytes(fp, &Stolen_items, sizeof(Stolen_items[0]) * Stolen_items.size());
+		checked_write( &Stolen_items, sizeof(Stolen_items[0]) * Stolen_items.size());
 	}
 
 	{
 		int temp;
 		temp = Point_segs_free_ptr - Point_segs;
-		PHYSFSX_writeBytes(fp, &temp, sizeof(int));
+		checked_write( &temp, sizeof(int));
 	}
 
 	unsigned Num_boss_teleport_segs = Boss_teleport_segs.size();
-	PHYSFSX_writeBytes(fp, &Num_boss_teleport_segs, sizeof(Num_boss_teleport_segs));
+	checked_write( &Num_boss_teleport_segs, sizeof(Num_boss_teleport_segs));
 	unsigned Num_boss_gate_segs = Boss_gate_segs.size();
-	PHYSFSX_writeBytes(fp, &Num_boss_gate_segs, sizeof(Num_boss_gate_segs));
+	checked_write( &Num_boss_gate_segs, sizeof(Num_boss_gate_segs));
 	/* Boss special segment arrays are an array of
 	 * `valptridx<segment>::idx<vc>`, which is not POD because it is not
 	 * default-constructible.  Starting in gcc-15, this causes such arrays to
@@ -4917,13 +4925,13 @@ similar/main/ai.cpp:4867:45: note: function parameter 'src' with unknown value c
 	if (Num_boss_gate_segs)
 	{
 		const auto pod_segs{build_pod_segs(Boss_gate_segs, Num_boss_gate_segs)};
-		PHYSFSX_writeBytes(fp, pod_segs.data(), sizeof(uint16_t) * Num_boss_gate_segs);
+		checked_write( pod_segs.data(), sizeof(uint16_t) * Num_boss_gate_segs);
 	}
 
 	if (Num_boss_teleport_segs)
 	{
 		const auto pod_segs{build_pod_segs(Boss_teleport_segs, Num_boss_teleport_segs)};
-		PHYSFSX_writeBytes(fp, pod_segs.data(), sizeof(uint16_t) * Num_boss_teleport_segs);
+		checked_write( pod_segs.data(), sizeof(uint16_t) * Num_boss_teleport_segs);
 	}
 #endif
 }
