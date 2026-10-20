@@ -694,7 +694,7 @@ static void add_builtin_mission_to_list(mission_list_type &mission_list, d_fname
 }
 #endif
 
-static void add_missions_to_list(mission_list_type &mission_list, mission_candidate_search_path &path, const mission_candidate_search_path::iterator rel_path, const mission_filter_mode mission_filter)
+static void add_missions_to_list(mission_list_type &mission_list, mission_candidate_search_path &path, const mission_candidate_search_path::iterator rel_path, const mission_filter_mode mission_filter, const unsigned depth, std::size_t &remaining_entries)
 {
 	/* rel_path must point within the array `path`.
 	 * rel_path must point to the null that follows a possibly empty
@@ -709,6 +709,9 @@ static void add_missions_to_list(mission_list_type &mission_list, mission_candid
 	assert(std::distance(path.begin(), rel_path) < path.size() - 1);
 	assert(!*rel_path);
 	assert(path.begin() == rel_path || *std::prev(rel_path) == '/');
+	/* Bounds apply to the entire recursive scan, not separately to each subdirectory. */
+	if (depth >= 32 || !remaining_entries)
+		return;
 	const std::size_t space_remaining = std::distance(rel_path, path.end());
 	*rel_path = '.';
 	*std::next(rel_path) = 0;
@@ -717,6 +720,9 @@ static void add_missions_to_list(mission_list_type &mission_list, mission_candid
 		return;
 	for (const auto i : s)
 	{
+		if (!remaining_entries)
+			break;
+		--remaining_entries;
 		/* Add 1 to include the terminating null. */
 		const std::size_t il = strlen(i) + 1;
 		/* Add 2 for the slash+dot in case it is a directory. */
@@ -731,7 +737,7 @@ static void add_missions_to_list(mission_list_type &mission_list, mission_candid
 			*j = 0;
 			*null = '/';
 			mission_list_type sublist;
-			add_missions_to_list(sublist, path, j, mission_filter);
+			add_missions_to_list(sublist, path, j, mission_filter, depth + 1, remaining_entries);
 			*null = 0;
 			const auto found = sublist.size();
 			if (!found)
@@ -835,7 +841,8 @@ static mission_list_type build_mission_list(const mission_filter_mode mission_fi
 	add_d1_builtin_mission_to_list(mission_list);
 	mission_candidate_search_path search_str{{MISSION_DIR}};
 	DXX_POISON_MEMORY(std::span(search_str).subspan<sizeof(MISSION_DIR)>(), 0xcc);
-	add_missions_to_list(mission_list, search_str, std::next(search_str.begin(), sizeof(MISSION_DIR) - 1), mission_filter);
+	std::size_t remaining_mission_entries = 16384;
+	add_missions_to_list(mission_list, search_str, std::next(search_str.begin(), sizeof(MISSION_DIR) - 1), mission_filter, 0, remaining_mission_entries);
 	
 	// move original missions (in story-chronological order)
 	// to top of mission list

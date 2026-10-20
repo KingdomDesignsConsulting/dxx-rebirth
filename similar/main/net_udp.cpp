@@ -32,6 +32,7 @@
 #include "player.h"
 #include "gameseq.h"
 #include "net_udp.h"
+#include "net_udp_packet_validate.h"
 #include "game.h"
 #include "gauges.h"
 #include "multi.h"
@@ -2458,7 +2459,8 @@ static int net_udp_verify_objects(int remote, int local)
 	auto &vcobjptr = Objects.vcptr;
 	int nplayers{0};
 
-	if ((remote-local) > 10)
+	// Final snapshot count must match exactly; use no potentially overflowing signed subtraction.
+	if (remote < 0 || remote > MAX_OBJECTS || local < 0 || local > MAX_OBJECTS || remote != local)
 		return(2);
 
 	for (auto &obj : vcobjptr)
@@ -2473,7 +2475,7 @@ static int net_udp_verify_objects(int remote, int local)
 	return(1);
 }
 
-static void net_udp_read_object_packet(const d_level_shared_robot_info_state &LevelSharedRobotInfoState, const uint8_t *const data)
+static void net_udp_read_object_packet(const d_level_shared_robot_info_state &LevelSharedRobotInfoState, const uint8_t *const data, const std::size_t length)
 {
 	auto &Objects = LevelUniqueObjectState.Objects;
 	auto &Robot_info = LevelSharedRobotInfoState.Robot_info;
@@ -2482,17 +2484,25 @@ static void net_udp_read_object_packet(const d_level_shared_robot_info_state &Le
 	sbyte obj_owner;
 	static int mode = 0, object_count = 0, my_pnum = 0;
 	unsigned loc{5};
+	if (length < loc)
+		return;
 	const int nobj{GET_INTEL_INT<int32_t>(&data[1])};
+	if (nobj < 0 || static_cast<std::size_t>(nobj) > (length - loc) / 9)
+		return;
 
 	for (int i = 0; i < nobj; i++)
 	{
+		if (length - loc < 9)
+			return;
 		const unsigned uobjnum{GET_INTEL_INT(&data[loc])};
 		objnum_t objnum = uobjnum;                         loc += 4;
-		obj_owner = data[loc];                                      loc += 1;
+		obj_owner = static_cast<sbyte>(data[loc]);                   loc += 1;
 		const int remote_objnum{GET_INTEL_INT<int32_t>(&data[loc])};                  loc += 4;
 
 		if (objnum == object_none) 
 		{
+			if (obj_owner < 0 || obj_owner >= MAX_PLAYERS)
+				return;
 			// Clear object array
 			init_objects();
 			Network_rejoined = 1;
@@ -2509,9 +2519,6 @@ static void net_udp_read_object_packet(const d_level_shared_robot_info_state &Le
 				special_reset_objects(LevelUniqueObjectState, Robot_info);
 				mode = 0;
 			}
-			if (remote_objnum != object_count) {
-				Int3();
-			}
 			if (net_udp_verify_objects(remote_objnum, object_count))
 			{
 				// Failed to sync up 
@@ -2522,11 +2529,18 @@ static void net_udp_read_object_packet(const d_level_shared_robot_info_state &Le
 		}
 		else 
 		{
+			if ((obj_owner < -1) || obj_owner >= MAX_PLAYERS || uobjnum >= MAX_OBJECTS ||
+				(obj_owner >= 0 && (remote_objnum < 0 || remote_objnum >= MAX_OBJECTS)))
+				return;
+			if (length - loc < sizeof(object_rw))
+				return;
 			object_count++;
 			if ((obj_owner == my_pnum) || (obj_owner == -1)) 
 			{
 				if (mode != 1)
 					Int3(); // SEE ROB
+				if (remote_objnum < 0 || remote_objnum >= MAX_OBJECTS)
+					return;
 				objnum = remote_objnum;
 			}
 			else {
@@ -2561,6 +2575,8 @@ static void net_udp_read_object_packet(const d_level_shared_robot_info_state &Le
 			}
 		} // For a standard onbject
 	} // For each object in packet
+	if (loc != length)
+		return;
 }
 
 }
@@ -3495,9 +3511,13 @@ static void net_udp_process_packet(const d_level_shared_robot_info_state &LevelS
 			net_udp_read_sync_packet(data, length, sender_addr);
 			break;
 		case upid::object_data:
-			if (multi_i_am_master() || length > UPID_MAX_SIZE || Network_status != network_state::waiting)
+			if (multi_i_am_master() || length > UPID_MAX_SIZE || Network_status != network_state::waiting ||
+				Netgame.players[0].protocol.udp.addr != sender_addr ||
+				!net_udp_validate::object_data(buf, sizeof(object_rw),
+					static_cast<std::uint32_t>(object_none),
+					static_cast<std::uint32_t>(network_checksum_marker_object), MAX_OBJECTS, MAX_PLAYERS))
 				break;
-			net_udp_read_object_packet(LevelSharedRobotInfoState, data);
+			net_udp_read_object_packet(LevelSharedRobotInfoState, data, length);
 			break;
 		case upid::ping:
 			if (multi_i_am_master())
@@ -3512,11 +3532,15 @@ static void net_udp_process_packet(const d_level_shared_robot_info_state &LevelS
 				net_udp_process_pong(*s, sender_addr);
 			break;
 		case upid::endlevel_h:
-			if ((!multi_i_am_master()) && (Network_status == network_state::endlevel || Network_status == network_state::playing))
+			if ((!multi_i_am_master()) &&
+				length == 2 + (5 * Players.size()) + sizeof(kill_matrix) &&
+				(Network_status == network_state::endlevel || Network_status == network_state::playing))
 				net_udp_read_endlevel_packet(data, sender_addr);
 			break;
 		case upid::endlevel_c:
-			if ((multi_i_am_master()) && (Network_status == network_state::endlevel || Network_status == network_state::playing))
+			if (multi_i_am_master() &&
+				net_udp_validate::endlevel_client(buf, 8 + sizeof(kill_matrix[0]), Netgame.max_numplayers) &&
+				(Network_status == network_state::endlevel || Network_status == network_state::playing))
 				net_udp_read_endlevel_packet(data, sender_addr);
 			break;
 		case upid::pdata:
@@ -3565,7 +3589,10 @@ void net_udp_read_endlevel_packet(const uint8_t *data, const _sockaddr &sender_a
 	
 	if (multi_i_am_master())
 	{
-		playernum_t pnum = data[1];
+		const unsigned raw_pnum = data[1];
+		if (raw_pnum >= MAX_PLAYERS || raw_pnum >= Netgame.max_numplayers)
+			return;
+		const playernum_t pnum = static_cast<playernum_t>(raw_pnum);
 
 		if (Netgame.players[pnum].protocol.udp.addr != sender_addr)
 			return;

@@ -508,6 +508,9 @@ owned_remote_objnum objnum_local_to_remote(objnum_t local_objnum)
 void map_objnum_local_to_remote(const objnum_t local_objnum, const int remote_objnum, const int owner)
 {
 	// Add a mapping from a network remote object number to a local one
+	if (local_objnum >= MAX_OBJECTS || remote_objnum < 0 || remote_objnum >= MAX_OBJECTS ||
+		owner < 0 || owner >= N_players || owner == Player_num)
+		return;
 	Assert(local_objnum < MAX_OBJECTS);
 	Assert(remote_objnum > -1);
 	Assert(remote_objnum < MAX_OBJECTS);
@@ -1994,7 +1997,7 @@ static void multi_do_escape(fvmobjptridx &vmobjptridx, const playernum_t pnum, c
 	if (+(Game_mode & GM_NETWORK))
 		plr.connected = connected;
 	create_player_appearance_effect(Vclip, objnum);
-	multi_make_player_ghost(buf[1]);
+	multi_make_player_ghost(pnum);
 }
 
 static void multi_do_remobj(fvmobjptr &vmobjptr, const multiplayer_rspan<multiplayer_command_t::MULTI_REMOVE_OBJECT> buf)
@@ -2370,12 +2373,13 @@ static void multi_do_drop_marker(object_array &Objects, fvmsegptridx &vmsegptrid
 	const auto gmi = convert_player_marker_index_to_game_marker_index(game_mode, max_numplayers, pnum, player_marker_index{mesnum});
 	auto &marker_message = MarkerState.message[gmi];
 	marker_message = {};
-	for (const auto i : xrange(marker_message.size()))
+	for (const auto i : xrange(marker_message.size() - 1))
 	{
 		const auto c = marker_message[i] = buf[15 + i];
 		if (!c)
 			break;
 	}
+	marker_message.back() = 0;
 
 	auto &mo = MarkerState.imobjidx[gmi];
 	if (mo != object_none)
