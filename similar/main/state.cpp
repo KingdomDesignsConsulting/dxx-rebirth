@@ -1173,26 +1173,104 @@ static int copy_file(const char *old_file, const char *new_file)
 	RAIIPHYSFS_File in_file{PHYSFS_openRead(old_file)};
 	if (!in_file)
 		return -2;
-	RAIIPHYSFS_File out_file{PHYSFS_openWrite(new_file)};
+	const std::string staged_name = std::string(new_file) + ".tmp";
+	RAIIPHYSFS_File out_file{PHYSFS_openWrite(staged_name.c_str())};
 	if (!out_file)
 		return -1;
 
+	const auto discard_staged = [&]() {
+		out_file.close();
+		PHYSFS_delete(staged_name.c_str());
+	};
 	constexpr std::size_t buf_size = 512 * 1024;
 	const auto buf = std::make_unique<uint8_t[]>(buf_size);
-	const auto pbuf = buf.get();
+	PHYSFS_uint64 copied = 0;
 	while (!PHYSFS_eof(in_file))
 	{
-		const auto bytes_read{PHYSFSX_readBytes(in_file, pbuf, buf_size)};
-		if (bytes_read < 0)
-			Error("Cannot read from file <%s>: %s", old_file, PHYSFS_getLastError());
-
-		if (PHYSFSX_writeBytes(out_file, pbuf, bytes_read) < bytes_read)
-			Error("Cannot write to file <%s>: %s", new_file, PHYSFS_getLastError());
+		const auto bytes_read = PHYSFS_readBytes(in_file, buf.get(), buf_size);
+		if (bytes_read < 0 || (bytes_read == 0 && !PHYSFS_eof(in_file)))
+		{
+			discard_staged();
+			return -3;
+		}
+		if (bytes_read == 0)
+			break;
+		if (PHYSFS_writeBytes(out_file, buf.get(), static_cast<PHYSFS_uint64>(bytes_read)) != bytes_read)
+		{
+			discard_staged();
+			return -4;
+		}
+		copied += static_cast<PHYSFS_uint64>(bytes_read);
 	}
 	if (!out_file.close())
-		return -4;
-
+	{
+		PHYSFS_delete(staged_name.c_str());
+		return -5;
+	}
+	const auto write_root = PHYSFS_getWriteDir();
+	if (!write_root)
+	{
+		PHYSFS_delete(staged_name.c_str());
+		return -6;
+	}
+	const auto staged_path = std::filesystem::path(write_root) / staged_name;
+	const auto final_path = std::filesystem::path(write_root) / new_file;
+	std::error_code ec;
+	const auto actual_size = std::filesystem::file_size(staged_path, ec);
+	if (ec || actual_size != copied)
+	{
+		PHYSFS_delete(staged_name.c_str());
+		return -7;
+	}
+	if (std::rename(staged_path.string().c_str(), final_path.string().c_str()) != 0)
+	{
+		PHYSFS_delete(staged_name.c_str());
+		return -8;
+	}
 	return 0;
+}
+
+/* Restore a staged backup by rename.  Do not delete the backup on failure:
+ * it is the recovery copy if the destination cannot be replaced. */
+static bool restore_backup_file(const char *backup, const char *destination)
+{
+    const auto root = PHYSFS_getWriteDir();
+    if (!root)
+        return false;
+    const auto src = std::filesystem::path(root) / backup;
+    const auto dst = std::filesystem::path(root) / destination;
+    return std::rename(src.string().c_str(), dst.string().c_str()) == 0;
+}
+
+/* Roll back a newly created file when the pre-transaction state was absence.
+ * If deletion itself fails, move the unexpected new file to the recovery
+ * path, leaving the active name absent and an on-disk guard that prevents a
+ * subsequent transaction from silently treating the new file as a baseline.
+ * If both operations fail, create an explicit unresolved guard.  Never
+ * overwrite an existing recovery record. */
+static bool restore_absent_file(const char *destination, const char *recovery)
+{
+    if (!PHYSFS_exists(destination))
+        return true;
+    if (PHYSFS_delete(destination))
+        return true;
+    if (PHYSFS_exists(recovery))
+        return false;
+    const auto root = PHYSFS_getWriteDir();
+    if (root)
+    {
+        const auto src = std::filesystem::path(root) / destination;
+        const auto dst = std::filesystem::path(root) / recovery;
+        if (std::rename(src.string().c_str(), dst.string().c_str()) == 0)
+            return true;
+    }
+    /* No old file exists to put in a backup.  An empty .pairbak is a
+     * persistent unresolved-absence marker.  Failure to create it remains
+     * critical and is reported by the caller, not silently ignored. */
+    RAIIPHYSFS_File marker{PHYSFS_openWrite(recovery)};
+    if (!marker || !marker.close())
+        return false;
+    return false;
 }
 
 static void format_secret_sgc_filename(std::array<char, PATH_MAX> &fname, const d_game_unique_state::save_slot filenum)
@@ -1261,36 +1339,63 @@ int state_save_all(const secret_save secret, const blind_save blind_save)
 			return 0;
 		filename = filename_storage.data();
 	}
+	}
+
 #if DXX_BUILD_DESCENT == 2
-	//	MK, 1/1/96
-	//	Do special secret level stuff.
-	//	If secret.sgc exists, then copy it to Nsecret.sgc (where N = filenum).
-	//	If it doesn't exist, then delete Nsecret.sgc
-	if (secret == secret_save::none && !(Game_mode & GM_MULTI_COOP)) {
-		if (filenum != d_game_unique_state::save_slot::None)
-		{
-			std::array<char, PATH_MAX> fname;
-			const auto temp_fname = fname.data();
-			format_secret_sgc_filename(fname, filenum);
-			if (PHYSFS_exists(temp_fname))
-			{
-				if (!PHYSFS_delete(temp_fname))
-					Error("Cannot delete file <%s>: %s", temp_fname, PHYSFS_getLastError());
-			}
-
-			if (PHYSFS_exists(SECRETC_FILENAME))
-			{
-				const int rval = copy_file(SECRETC_FILENAME, temp_fname);
-				Assert(rval == 0);	//	Oops, error copying secret.sgc to temp_fname!
-				(void)rval;
-			}
-		}
-	}
+    /* The main slot and companion form one logical save.  Keep the old main
+     * until the companion is successfully published.  The backup also lets
+     * us recover if the new companion's staged copy/rename fails. */
+    const bool pair_save = secret == secret_save::none && !(Game_mode & GM_MULTI_COOP) &&
+        filenum != d_game_unique_state::save_slot::None;
+    const std::string main_backup = std::string(filename) + ".pairbak";
+    const bool had_main = pair_save && PHYSFS_exists(filename);
+    if (pair_save)
+    {
+        /* Never overwrite an unresolved recovery backup. */
+        if (PHYSFS_exists(main_backup.c_str()))
+        {
+            con_printf(CON_URGENT, "Save blocked: unresolved backup %s", main_backup.c_str());
+            return 0;
+        }
+        if (had_main && copy_file(filename, main_backup.c_str()) != 0)
+        {
+            con_printf(CON_URGENT, "Save backup failed: %s (existing pair preserved)", filename);
+            return 0;
+        }
+    }
 #endif
-	}
-
-	const int rval = state_save_all_sub(filename, desc.data());
-
+    const int rval = state_save_all_sub(filename, desc.data());
+#if DXX_BUILD_DESCENT == 2
+    if (pair_save)
+    {
+        bool companion_ok = rval != 0;
+        if (companion_ok)
+        {
+            std::array<char, PATH_MAX> companion_filename;
+            format_secret_sgc_filename(companion_filename, filenum);
+            if (PHYSFS_exists(SECRETC_FILENAME))
+                companion_ok = copy_file(SECRETC_FILENAME, companion_filename.data()) == 0;
+            else if (PHYSFS_exists(companion_filename.data()))
+                companion_ok = PHYSFS_delete(companion_filename.data()) != 0;
+        }
+        if (!companion_ok)
+        {
+            bool recovered = true;
+            if (rval)
+                recovered = had_main ? restore_backup_file(main_backup.c_str(), filename)
+                                     : restore_absent_file(filename, main_backup.c_str());
+            if (!recovered)
+                con_printf(CON_URGENT, "CRITICAL: save pair rollback failed; inspect unresolved recovery record: %s", main_backup.c_str());
+            else if (had_main)
+                PHYSFS_delete(main_backup.c_str());
+            con_printf(CON_URGENT, "Save pair update failed: %s (rollback %s)", filename,
+                recovered ? "completed" : "needs recovery");
+            return 0;
+        }
+        if (had_main && !PHYSFS_delete(main_backup.c_str()))
+            con_printf(CON_URGENT, "Save succeeded; recovery backup cleanup failed: %s", main_backup.c_str());
+    }
+#endif
 	if (rval && secret == secret_save::none)
 		HUD_init_message(HM_DEFAULT, "Game saved to \"%s\": \"%s\"", filename, desc.data());
 
@@ -1875,38 +1980,70 @@ int state_restore_all(const int in_game, const secret_restore secret, const char
 		}
 		filename = filename_storage.data();
 	}
-#if DXX_BUILD_DESCENT == 2
-	//	MK, 1/1/96
-	//	Do special secret level stuff.
-	//	If Nsecret.sgc (where N = filenum) exists, then copy it to secret.sgc.
-	//	If it doesn't exist, then delete secret.sgc
-	if (secret == secret_restore::none)
-	{
-		int	rval;
+    if (secret == secret_restore::none && in_game && blind == blind_save::no)
+    {
+        const auto choice = nm_messagebox_str(menu_title{nullptr}, nm_messagebox_tie(TXT_YES, TXT_NO), menu_subtitle{"Restore Game?"});
+        if (choice != 0)
+            return 0;
+    }
 
-		if (filenum != d_game_unique_state::save_slot::None)
-		{
-			std::array<char, PATH_MAX> fname;
-			const auto temp_fname = fname.data();
-			format_secret_sgc_filename(fname, filenum);
-			if (PHYSFS_exists(temp_fname))
-			{
-				rval = copy_file(temp_fname, SECRETC_FILENAME);
-				Assert(rval == 0);	//	Oops, error copying temp_fname to secret.sgc!
-				(void)rval;
-			} else
-				PHYSFS_delete(SECRETC_FILENAME);
-		}
 	}
+#if DXX_BUILD_DESCENT == 2
+    if (secret == secret_restore::none && filenum != d_game_unique_state::save_slot::None)
+    {
+        /* Check the selected main file before mutating the live companion.
+         * This catches failed opens and corrupt headers without changing
+         * the currently running game's companion.  Full restore validation
+         * remains the separate PERSIST3 responsibility. */
+        {
+            RAIIPHYSFS_File check_main{PHYSFS_openRead(filename)};
+            char header[sizeof(dgss_id)];
+            if (!check_main || PHYSFS_readBytes(check_main, header, sizeof(header)) != sizeof(header) ||
+                memcmp(header, dgss_id, sizeof(header)) != 0)
+            {
+                con_printf(CON_URGENT, "Restore preflight failed: %s (live companion preserved)", filename);
+                return 0;
+            }
+        }
+        std::array<char, PATH_MAX> slot_companion;
+        format_secret_sgc_filename(slot_companion, filenum);
+        const bool had_live = PHYSFS_exists(SECRETC_FILENAME);
+        const std::string live_backup = std::string(SECRETC_FILENAME) + ".pairbak";
+        if (PHYSFS_exists(live_backup.c_str()))
+        {
+            con_printf(CON_URGENT, "Restore blocked: unresolved companion backup %s", live_backup.c_str());
+            return 0;
+        }
+        if (had_live && copy_file(SECRETC_FILENAME, live_backup.c_str()) != 0)
+            return 0;
+        bool installed = true;
+        if (PHYSFS_exists(slot_companion.data()))
+            installed = copy_file(slot_companion.data(), SECRETC_FILENAME) == 0;
+        else if (had_live)
+            installed = PHYSFS_delete(SECRETC_FILENAME) != 0;
+        if (!installed)
+        {
+            if (had_live)
+                PHYSFS_delete(live_backup.c_str());
+            con_printf(CON_URGENT, "Secret companion restore failed: %s", slot_companion.data());
+            return 0;
+        }
+        const int restored = state_restore_all_sub(LevelSharedSegmentState.DestructibleLights, secret, filename);
+        if (!restored)
+        {
+            const bool recovered = had_live ? restore_backup_file(live_backup.c_str(), SECRETC_FILENAME)
+                                            : restore_absent_file(SECRETC_FILENAME, live_backup.c_str());
+            if (!recovered)
+                con_printf(CON_URGENT, "CRITICAL: live companion rollback failed; inspect unresolved recovery record: %s", live_backup.c_str());
+            else
+                con_printf(CON_URGENT, "Main restore failed; previous companion restored");
+            return 0;
+        }
+        if (had_live && !PHYSFS_delete(live_backup.c_str()))
+            con_printf(CON_URGENT, "Restore succeeded; companion backup cleanup failed: %s", live_backup.c_str());
+        return restored;
+    }
 #endif
-	if (secret == secret_restore::none && in_game && blind == blind_save::no)
-	{
-		const auto choice = nm_messagebox_str(menu_title{nullptr}, nm_messagebox_tie(TXT_YES, TXT_NO), menu_subtitle{"Restore Game?"});
-		if ( choice != 0 )	{
-			return 0;
-		}
-	}
-	}
 	return state_restore_all_sub(
 #if DXX_BUILD_DESCENT == 2
 		LevelSharedSegmentState.DestructibleLights, secret,
