@@ -1043,10 +1043,11 @@ static void hud_show_timer_count(grs_canvas &canvas, const game_mode_flags Game_
 
 		gr_set_fontcolor(canvas, Color_0_31_0, -1);
 
-			char score_str[20];
-			snprintf(score_str, sizeof(score_str), "T - %5d", SecondsUntilPlayTimeAllowedElapses + 1);
+		char score_str[20];
+		snprintf(score_str, sizeof(score_str), "T - %5d", SecondsUntilPlayTimeAllowedElapses + 1);
 		const auto &&[w, h] = gr_get_string_size(*canvas.cv_font, score_str);
-			gr_string(canvas, *canvas.cv_font, canvas.cv_bitmap.bm_w - w - FSPACX(12), LINE_SPACING(*canvas.cv_font, *GAME_FONT) + FSPACY(1), score_str, w, h);
+		const auto safe = get_hud_safe_margins(canvas);
+		gr_string(canvas, *canvas.cv_font, canvas.cv_bitmap.bm_w - w - FSPACX(12) - safe.right, LINE_SPACING(*canvas.cv_font, *GAME_FONT) + FSPACY(1), score_str, w, h);
 	}
 }
 
@@ -1077,7 +1078,8 @@ static void hud_show_score_added(grs_canvas &canvas, const game_mode_flags Game_
 		gr_set_fontcolor(canvas, BM_XRGB(0, color, 0), -1);
 		auto &game_font = *GAME_FONT;
 		const auto &&[w, h] = gr_get_string_size(game_font, score_str);
-		gr_string(canvas, game_font, canvas.cv_bitmap.bm_w - w - FSPACX(PlayerCfg.CockpitMode[1] == cockpit_mode_t::full_screen ? 1 : 12), LINE_SPACING(game_font, game_font) + FSPACY(1), score_str, w, h);
+		const auto safe = get_hud_safe_margins(canvas);
+		gr_string(canvas, game_font, canvas.cv_bitmap.bm_w - w - FSPACX(PlayerCfg.CockpitMode[1] == cockpit_mode_t::full_screen ? 1 : 12) - safe.right, LINE_SPACING(game_font, game_font) + FSPACY(1), score_str, w, h);
 	} else {
 		score_time = 0;
 		score_display = 0;

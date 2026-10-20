@@ -24,6 +24,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  */
 
 #include <algorithm>
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gamefont.h"
 #include "u_mem.h"
 #include "kconfig.h"
+#if SDL_MAJOR_VERSION == 2
+#endif
 #include "digi.h"
 #include "key.h"
 #include "mouse.h"
@@ -213,6 +216,8 @@ struct kc_menu : window
 #endif
 #endif
 	virtual window_event_result event_handler(const d_event &) override;
+	bool is_touch_menu() const override { return true; }
+	bool dismiss_on_outside_touch() const override { return true; }
 };
 
 }
@@ -1670,6 +1675,64 @@ static unsigned release_pitch_lock()
 
 namespace dsx {
 
+#if SDL_MAJOR_VERSION == 2
+void kconfig_mobile_touch_action(const dcx::mobile_touch_action action, const bool down)
+{
+	constexpr uint8_t touch_state_bit = 1u << 5;
+	const auto set_state = [down](uint8_t &state) {
+		if (down)
+			state |= touch_state_bit;
+		else
+			state &= ~touch_state_bit;
+	};
+	switch (action)
+	{
+		case dcx::mobile_touch_action::pitch_forward: set_state(Controls.state.key_pitch_forward); break;
+		case dcx::mobile_touch_action::pitch_backward: set_state(Controls.state.key_pitch_backward); break;
+		case dcx::mobile_touch_action::turn_left: set_state(Controls.state.key_heading_left); break;
+		case dcx::mobile_touch_action::turn_right: set_state(Controls.state.key_heading_right); break;
+		case dcx::mobile_touch_action::slide_left: set_state(Controls.state.key_slide_left); break;
+		case dcx::mobile_touch_action::slide_right: set_state(Controls.state.key_slide_right); break;
+		case dcx::mobile_touch_action::slide_up: set_state(Controls.state.key_slide_up); break;
+		case dcx::mobile_touch_action::slide_down: set_state(Controls.state.key_slide_down); break;
+		case dcx::mobile_touch_action::bank_left: set_state(Controls.state.key_bank_left); break;
+		case dcx::mobile_touch_action::bank_right: set_state(Controls.state.key_bank_right); break;
+		case dcx::mobile_touch_action::accelerate: set_state(Controls.state.accelerate); break;
+		case dcx::mobile_touch_action::reverse: set_state(Controls.state.reverse); break;
+		case dcx::mobile_touch_action::gyro_recenter:
+			if (down) dcx::mobile_gyro_recenter();
+			break;
+		case dcx::mobile_touch_action::fire_primary: set_state(Controls.state.fire_primary); break;
+		case dcx::mobile_touch_action::fire_secondary: set_state(Controls.state.fire_secondary); break;
+		case dcx::mobile_touch_action::automap: set_state(Controls.state.automap); break;
+		case dcx::mobile_touch_action::rear_view: set_state(Controls.state.rear_view); break;
+		case dcx::mobile_touch_action::fire_flare:
+			if (down) ++Controls.state.fire_flare;
+			break;
+		case dcx::mobile_touch_action::weapon_1:
+			if (down) Controls.state.select_weapon = 1;
+			break;
+		case dcx::mobile_touch_action::weapon_6:
+			if (down) Controls.state.select_weapon = 6;
+			break;
+#if DXX_BUILD_DESCENT == 2
+		case dcx::mobile_touch_action::headlight:
+			if (down) ++Controls.state.headlight;
+			break;
+		case dcx::mobile_touch_action::energy_to_shield:
+			set_state(Controls.state.energy_to_shield);
+			break;
+#else
+		case dcx::mobile_touch_action::headlight:
+		case dcx::mobile_touch_action::energy_to_shield:
+			break;
+#endif
+		case dcx::mobile_touch_action::none:
+			break;
+	}
+}
+#endif
+
 void kconfig_read_controls(control_info &Controls, const d_event &event, int automap_flag)
 {
 	static fix64 mouse_delta_time = 0;
@@ -2032,19 +2095,29 @@ void kconfig_end_loop(control_info &Controls, const fix frametime)
 	}
 
 	//----------- Clamp values between -FrameTime and FrameTime
-	// On iOS, "Use mouse" selects the gyroscope.  Angular velocity drives
-	// pitch, heading and bank while the touch pad handles translation.
+	// On iOS, "Use mouse" selects a centered motion stick.  Holding the
+	// phone away from its calibrated position keeps the ship turning.
 #if SDL_MAJOR_VERSION == 2
 	mobile_gyro_set_requested(PlayerCfg.ControlType & CONTROL_USING_MOUSE);
-	float gyro_rates[3]{};
-	if (mobile_gyro_get_rates(gyro_rates))
+	float gyro_deflections[3]{};
+	if (mobile_gyro_get_deflections(gyro_deflections))
 	{
-		const auto gyro_time = [frametime](float rate) {
-			return static_cast<fix>(frametime * std::clamp(rate / 1.5f, -1.f, 1.f));
+		const auto gyro_time = [frametime](float deflection, int sensitivity) {
+			// A small neutral zone keeps the ship still when the phone is
+			// returned near center.  Full speed takes about 25 degrees of tilt.
+			constexpr float dead_zone = 0.04f;
+			constexpr float full_scale = 0.44f;
+			const float magnitude = std::abs(deflection);
+			if (magnitude <= dead_zone)
+				return fix{0};
+			// Reuse the per-axis Mouse Calibration sliders for stick speed.
+			const float normalized = std::clamp((magnitude - dead_zone) / (full_scale - dead_zone) *
+				static_cast<float>(sensitivity) / 8.f, 0.f, 1.f);
+			return static_cast<fix>(frametime * std::copysign(normalized, deflection));
 		};
-		Controls.pitch_time += gyro_time(-gyro_rates[0]);
-		Controls.heading_time += gyro_time(gyro_rates[1]);
-		Controls.bank_time += gyro_time(gyro_rates[2]);
+		Controls.pitch_time += gyro_time(-gyro_deflections[0], PlayerCfg.MouseSens[player_config_mouse_index::pitch_ud]);
+		Controls.heading_time += gyro_time(-gyro_deflections[1], PlayerCfg.MouseSens[player_config_mouse_index::turn_lr]);
+		Controls.bank_time += gyro_time(gyro_deflections[2], PlayerCfg.MouseSens[player_config_mouse_index::bank_lr]);
 	}
 #endif
 	clamp_kconfig_control_with_overrun(Controls.vertical_thrust_time, frametime, Controls.excess_vertical_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::slide_ud]);

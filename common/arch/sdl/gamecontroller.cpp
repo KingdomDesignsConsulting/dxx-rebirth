@@ -174,7 +174,24 @@ static std::array<int, GC_NUM_AXES> gc_axis_values{};
 
 static void gc_load_controller_db()
 {
-	// Try to load gamecontrollerdb.txt from PhysFS search path
+#if DXX_ENABLE_GAMECONTROLLER_SEARCH_SDL_BASE_DIRECTORY
+	// Prefer a native file beside the executable.  This avoids routing a normal
+	// packaged controller database through the PhysFS-to-SDL RWops bridge.
+	if (const auto base = SDL_GetBasePath())
+	{
+		std::array<char, PATH_MAX> path;
+		snprintf(path.data(), path.size(), "%sgamecontrollerdb.txt", base);
+		SDL_free(base);
+		if (const auto n{SDL_GameControllerAddMappingsFromFile(path.data())}; n >= 0)
+		{
+			con_printf(CON_NORMAL, "gamecontroller: loaded %d mappings from %s", n, path.data());
+			return;
+		}
+		con_printf(CON_VERBOSE, "gamecontroller: no usable mapping database at %s: %s", path.data(), SDL_GetError());
+	}
+#endif
+
+	// Fall back to the PhysFS search path for traditional data layouts.
 	if (auto &&[rwops, physfserr]{PHYSFSRWOPS_openRead("gamecontrollerdb.txt")}; rwops)
 	{
 		if (const auto n{SDL_GameControllerAddMappingsFromRW(rwops.get(), 0)}; n >= 0)
@@ -182,17 +199,11 @@ static void gc_load_controller_db()
 			con_printf(CON_NORMAL, "gamecontroller: loaded %d mappings from PhysFS gamecontrollerdb.txt", n);
 			return;
 		}
-		con_printf(CON_NORMAL, "gamecontroller: PhysFS found gamecontrollerdb.txt, but no mappings could be loaded: %s", SDL_GetError());
+		con_printf(CON_VERBOSE, "gamecontroller: PhysFS gamecontrollerdb.txt was not usable: %s", SDL_GetError());
 	}
 	else if (physfserr != PHYSFS_ERR_NOT_FOUND)
-		con_printf(CON_NORMAL, "gamecontroller: failed to use PhysFS to open gamecontrollerdb.txt: %s", PHYSFS_getErrorByCode(physfserr));
+		con_printf(CON_VERBOSE, "gamecontroller: failed to use PhysFS to open gamecontrollerdb.txt: %s", PHYSFS_getErrorByCode(physfserr));
 #ifdef DXX_GAMECONTROLLER_DB_DIRECTORY
-	/* Allow the build system to specify one additional search directory.  If
-	 * set, `DXX_GAMECONTROLLER_DB_DIRECTORY` must be a string literal suitable
-	 * for use with `SDL_RWFromFile`.  It must be a path in the platform native
-	 * form and, if relative, is parsed relative to the current working
-	 * directory of the game.
-	 */
 	{
 		static constexpr char path[]{DXX_GAMECONTROLLER_DB_DIRECTORY};
 		if (const auto n{SDL_GameControllerAddMappingsFromFile(path)}; n >= 0)
@@ -200,23 +211,7 @@ static void gc_load_controller_db()
 			con_printf(CON_NORMAL, "gamecontroller: loaded %d mappings from %s", n, path);
 			return;
 		}
-		con_printf(CON_NORMAL, "gamecontroller: found " DXX_GAMECONTROLLER_DB_DIRECTORY ", but no mappings could be loaded: %s", SDL_GetError());
-	}
-#endif
-#if DXX_ENABLE_GAMECONTROLLER_SEARCH_SDL_BASE_DIRECTORY
-	// Also try from the executable directory
-	if (const auto base = SDL_GetBasePath())
-	{
-		std::array<char, PATH_MAX> path;
-		snprintf(path.data(), path.size(), "%sgamecontrollerdb.txt", base);
-		SDL_free(base);
-		const auto n = SDL_GameControllerAddMappingsFromFile(path.data());
-		if (n >= 0)
-		{
-			con_printf(CON_NORMAL, "gamecontroller: loaded %d mappings from %s", n, path.data());
-			return;
-		}
-		con_printf(CON_NORMAL, "gamecontroller: SDL base directory contained gamecontrollerdb.txt, but no mappings could be loaded: %s", SDL_GetError());
+		con_printf(CON_VERBOSE, "gamecontroller: no usable mapping database at " DXX_GAMECONTROLLER_DB_DIRECTORY ": %s", SDL_GetError());
 	}
 #endif
 }

@@ -19,6 +19,7 @@
 namespace dcx {
 
 fix64 timer_update();
+void timer_reset();
 
 [[nodiscard]]
 fix64 timer_query();

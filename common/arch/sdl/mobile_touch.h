@@ -9,6 +9,7 @@
 #include <array>
 #include <map>
 #include <unordered_map>
+#include "event.h"
 #include "key.h"
 #include "mobile_safe_area.h"
 
@@ -21,6 +22,7 @@ class mobile_touch_controls
 	struct button
 	{
 		float x, y, width, height;
+		mobile_touch_action action;
 		SDL_Keycode primary, secondary;
 		bool follow_finger;
 	};
@@ -32,37 +34,39 @@ class mobile_touch_controls
 	// Rotation, translation and thrust use separate buttons in manual mode.
 	// Gyro mode reuses the center and left buttons for translation and thrust.
 	static constexpr std::array<button, 27> buttons{{
-		{120, 135, 55, 55, SDLK_UP, 0, true},
-		{120, 245, 55, 55, SDLK_DOWN, 0, true},
-		{65, 190, 55, 55, SDLK_LEFT, 0, true},
-		{175, 190, 55, 55, SDLK_RIGHT, 0, true},
-		{25, 135, 35, 80, SDLK_KP_MINUS, 0, true},
-		{25, 220, 35, 80, SDLK_KP_PLUS, 0, true},
-		{65, 95, 0, 0, 0, 0, true},
-		{150, 95, 0, 0, 0, 0, true},
-		{473, 150, 70, 70, SDLK_LCTRL, 0, false},
-		{393, 230, 70, 70, SDLK_SPACE, 0, false},
-		{473, 95, 70, 40, SDLK_1, 0, false},
-		{338, 230, 40, 70, SDLK_6, 0, false},
-		{483, 240, 50, 50, SDLK_f, 0, false},
-		{65, 135, 55, 55, SDLK_q, 0, true},
-		{175, 135, 55, 55, SDLK_e, 0, true},
-		{65, 245, 55, 55, SDLK_KP_1, 0, true},
-		{175, 245, 55, 55, SDLK_KP_3, 0, true},
-		{25, 20, 25, 25, SDLK_ESCAPE, 0, false},
-		{0, 20, 25, 25, SDLK_TAB, 0, false},
-		{0, 20, 25, 25, SDLK_r, 0, false},
-		{0, 20, 25, 25, SDLK_F3, 0, false},
-		{0, 20, 25, 25, SDLK_h, 0, false},
-		{0, 20, 25, 25, SDLK_t, 0, false},
-		{0, 20, 25, 25, SDLK_F4, 0, false},
-		{0, 20, 25, 25, SDLK_LSHIFT, SDLK_F4, false},
-		{120, 190, 55, 55, SDLK_w, 0, true},
-		{230, 245, 55, 55, SDLK_s, 0, true},
+		{120, 135, 55, 55, mobile_touch_action::pitch_forward, 0, 0, true},
+		{120, 245, 55, 55, mobile_touch_action::pitch_backward, 0, 0, true},
+		{65, 190, 55, 55, mobile_touch_action::turn_left, 0, 0, true},
+		{175, 190, 55, 55, mobile_touch_action::turn_right, 0, 0, true},
+		{25, 135, 35, 80, mobile_touch_action::slide_up, 0, 0, true},
+		{25, 220, 35, 80, mobile_touch_action::slide_down, 0, 0, true},
+		{65, 95, 0, 0, mobile_touch_action::none, 0, 0, true},
+		{150, 95, 0, 0, mobile_touch_action::none, 0, 0, true},
+		{473, 150, 70, 70, mobile_touch_action::fire_primary, 0, 0, false},
+		{393, 230, 70, 70, mobile_touch_action::fire_secondary, 0, 0, false},
+		{473, 95, 70, 40, mobile_touch_action::weapon_1, 0, 0, false},
+		{338, 230, 40, 70, mobile_touch_action::weapon_6, 0, 0, false},
+		{483, 240, 50, 50, mobile_touch_action::fire_flare, 0, 0, false},
+		{65, 135, 55, 55, mobile_touch_action::bank_left, 0, 0, true},
+		{175, 135, 55, 55, mobile_touch_action::bank_right, 0, 0, true},
+		{65, 245, 55, 55, mobile_touch_action::slide_left, 0, 0, true},
+		{175, 245, 55, 55, mobile_touch_action::slide_right, 0, 0, true},
+		{25, 20, 25, 25, mobile_touch_action::none, SDLK_ESCAPE, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::automap, 0, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::rear_view, 0, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::none, SDLK_F3, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::headlight, 0, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::energy_to_shield, 0, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::none, SDLK_F4, 0, false},
+		{0, 20, 25, 25, mobile_touch_action::none, SDLK_LSHIFT, SDLK_F4, false},
+		{120, 190, 55, 55, mobile_touch_action::accelerate, 0, 0, true},
+		{230, 245, 55, 55, mobile_touch_action::reverse, 0, 0, true},
 	}};
 
 	std::unordered_map<SDL_FingerID, unsigned> fingers;
 	std::map<SDL_Keycode, unsigned> held_keys;
+	std::map<mobile_touch_action, unsigned> held_actions;
+	void (*action_callback)(mobile_touch_action, bool) = nullptr;
 	bool descent2 = false;
 	bool gyro_mode = false;
 	static constexpr std::array<const char *, 27> labels{{
@@ -74,7 +78,7 @@ class mobile_touch_controls
 	static constexpr std::array<const char *, 27> gyro_labels{{
 		"SL U", "SL D", "", "", "FWD", "BACK", "", "",
 		"FIRE", "MISSILE", "WPN 1", "WPN 6", "FLARE",
-		"", "", "SL L", "SL R",
+		"CENTER", "", "SL L", "SL R",
 		"MENU", "MAP", "R", "F3", "H", "T", "F4", "GB", "", ""
 	}};
 
@@ -83,11 +87,12 @@ class mobile_touch_controls
 		auto b = buttons[i];
 		if (gyro_mode)
 		{
-			if (i == 0) b.primary = SDLK_KP_MINUS;
-			if (i == 1) b.primary = SDLK_KP_PLUS;
-			if (i == 4) b.primary = SDLK_w;
-			if (i == 5) b.primary = SDLK_s;
-			if (i == 2 || i == 3 || i == 13 || i == 14 || i == 25 || i == 26)
+			if (i == 0) b.action = mobile_touch_action::slide_up;
+			if (i == 1) b.action = mobile_touch_action::slide_down;
+			if (i == 4) b.action = mobile_touch_action::accelerate;
+			if (i == 5) b.action = mobile_touch_action::reverse;
+			if (i == 13) b.action = mobile_touch_action::gyro_recenter;
+			if (i == 2 || i == 3 || i == 14 || i == 25 || i == 26)
 				b.width = b.height = 0;
 		}
 		return b;
@@ -128,11 +133,30 @@ class mobile_touch_controls
 		}
 	}
 
+	void set_action(mobile_touch_action action, bool down)
+	{
+		if (action == mobile_touch_action::none || !action_callback)
+			return;
+		auto &count = held_actions[action];
+		if (down)
+		{
+			if (count++ == 0)
+				action_callback(action, true);
+		}
+		else if (count && --count == 0)
+			action_callback(action, false);
+	}
+
 	void transition(unsigned old_button, unsigned new_button)
 	{
 		const button empty{};
 		const auto old = old_button < buttons.size() ? active_button(old_button) : empty;
 		const auto next = new_button < buttons.size() ? active_button(new_button) : empty;
+		if (old.action != next.action)
+		{
+			set_action(old.action, false);
+			set_action(next.action, true);
+		}
 		for (const auto key : {old.primary, old.secondary})
 			if (key && !has_key(next, key))
 				set_key(key, false);
@@ -188,6 +212,13 @@ class mobile_touch_controls
 	}
 
 public:
+	void set_action_callback(void (*callback)(mobile_touch_action, bool))
+	{
+		if (action_callback != callback)
+			release_all();
+		action_callback = callback;
+	}
+
 	template <typename Callback>
 	void for_each_button(SDL_Window *window, Callback callback) const
 	{

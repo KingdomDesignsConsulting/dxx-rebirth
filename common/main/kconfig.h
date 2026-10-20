@@ -40,6 +40,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #ifdef DXX_BUILD_DESCENT
 namespace dcx {
 
+enum class mobile_touch_action : uint8_t;
+
 struct control_info
 {
 	template <typename T>
@@ -162,6 +164,7 @@ constexpr std::integral_constant<unsigned, 50> MAX_CONTROLS{};
 constexpr std::integral_constant<unsigned, 60> MAX_CONTROLS{};		// there are actually 48, so this leaves room for more
 #endif
 void kconfig_read_controls(control_info &, const d_event &event, int automap_flag);
+void kconfig_mobile_touch_action(dcx::mobile_touch_action action, bool down);
 }
 namespace dcx {
 extern fix Cruise_speed;

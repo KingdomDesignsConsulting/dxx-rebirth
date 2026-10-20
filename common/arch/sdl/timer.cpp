@@ -22,22 +22,28 @@
 namespace dcx {
 
 static fix64 F64_RunTime = 0;
+static bool timer_already_initialized;
+static fix64 timer_last_tv;
 
 fix64 timer_update()
 {
-	static bool already_initialized;
-	static fix64 last_tv;
 	const fix64 cur_tv = static_cast<fix64>(SDL_GetTicks()) * F1_0 / 1000;
-	const fix64 prev_tv = last_tv;
+	const fix64 prev_tv = timer_last_tv;
 	fix64 runtime = F64_RunTime;
-	last_tv = cur_tv;
-	if (unlikely(!already_initialized))
+	timer_last_tv = cur_tv;
+	if (unlikely(!timer_already_initialized))
 	{
-		already_initialized = true;
+		timer_already_initialized = true;
 	}
 	else if (likely(prev_tv < cur_tv)) // in case SDL_GetTicks wraps, don't update and have a little hickup
 		F64_RunTime = (runtime += (cur_tv - prev_tv)); // increment! this value will overflow long after we are all dead... so why bother checking?
 	return runtime;
+}
+
+void timer_reset()
+{
+	timer_last_tv = static_cast<fix64>(SDL_GetTicks()) * F1_0 / 1000;
+	timer_already_initialized = true;
 }
 
 fix64 timer_query(void)

@@ -2189,7 +2189,13 @@ window_event_result graphics_config_menu::event_handler(const d_event &event)
 		{
 			auto &citem = static_cast<const d_select_event &>(event).citem;
 			if (citem == opt_gr_screenres)
+			{
+#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS) || (defined(TARGET_OS_TV) && TARGET_OS_TV)
+				window_create<passive_messagebox>(menu_title{nullptr}, menu_subtitle{"Screen resolution is controlled by the device display."}, TXT_OK, grd_curscreen->sc_canvas);
+#else
 				window_create<screen_resolution_menu>();
+#endif
+			}
 			else if (citem == opt_gr_hudmenu)
 				hud_config();
 			return window_event_result::handled;		// stay in menu
@@ -2228,7 +2234,15 @@ window_event_result graphics_config_menu::event_handler(const d_event &event)
 			reset_cockpit();
 #if DXX_USE_OGL
 			gr_set_attributes();
+#if SDL_MAJOR_VERSION == 2
+			/* The OpenGL drawable can differ from Game_screen_mode on HiDPI and
+			 * fixed-size mobile displays.  Reinitializing from the configured
+			 * mode here would leave the viewport covering only part of the
+			 * actual drawable (notably on iOS/tvOS). */
+			gr_set_mode_from_window_size();
+#else
 			gr_set_mode(Game_screen_mode);
+#endif
 #endif
 			break;
 

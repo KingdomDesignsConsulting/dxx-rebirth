@@ -20,13 +20,27 @@ namespace dcx {
 
 struct grs_canvas;
 
+enum class mobile_touch_action : uint8_t
+{
+	none,
+	pitch_forward, pitch_backward, turn_left, turn_right,
+	slide_left, slide_right, slide_up, slide_down,
+	bank_left, bank_right, accelerate, reverse,
+	gyro_recenter,
+	fire_primary, fire_secondary, fire_flare,
+	automap, rear_view, weapon_1, weapon_6,
+	headlight, energy_to_shield,
+};
+using mobile_touch_action_callback = void (*)(mobile_touch_action, bool);
+
 #if SDL_MAJOR_VERSION == 2
-void mobile_touch_set_gameplay(bool active, bool descent2);
+void mobile_touch_set_gameplay(bool active, bool descent2, mobile_touch_action_callback action_callback);
 void mobile_touch_set_intro_skip(bool active);
 bool mobile_touch_intro_was_skipped();
 void mobile_touch_draw_overlay(grs_canvas &canvas, SDL_Window *window);
-bool mobile_gyro_get_rates(float (&rates)[3]);
+bool mobile_gyro_get_deflections(float (&deflections)[3]);
 void mobile_gyro_set_requested(bool requested);
+void mobile_gyro_recenter();
 bool mobile_gyro_is_active();
 #endif
 

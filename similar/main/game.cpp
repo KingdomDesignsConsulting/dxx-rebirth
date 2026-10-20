@@ -469,7 +469,7 @@ int set_screen_mode(int sm)
 
 	Screen_mode = sm;
 #if SDL_MAJOR_VERSION == 2
-	mobile_touch_set_gameplay(sm == SCREEN_GAME, DXX_BUILD_DESCENT == 2);
+	mobile_touch_set_gameplay(sm == SCREEN_GAME, DXX_BUILD_DESCENT == 2, kconfig_mobile_touch_action);
 #endif
 
 #if SDL_MAJOR_VERSION == 1
@@ -865,14 +865,20 @@ void record_screenshot_text_metadata(png_struct *const png_ptr, png_info *const 
 #endif
 unsigned write_screenshot_png(PHYSFS_File *const file, const struct tm *const tm, const grs_bitmap &bitmap, const palette_array_t &pal)
 {
-	const unsigned bm_w = ((bitmap.bm_w + 3) & ~3);
-	const unsigned bm_h = ((bitmap.bm_h + 3) & ~3);
 #if DXX_USE_OGL
+	const unsigned bm_w = bitmap.bm_w;
+	const unsigned bm_h = bitmap.bm_h;
 	const unsigned bufsize = bm_w * bm_h * 3;
 	const auto buf = std::make_unique<uint8_t[]>(bufsize);
 	const auto begin_byte_buffer = buf.get();
+	GLint old_pack_alignment;
+	glGetIntegerv(GL_PACK_ALIGNMENT, &old_pack_alignment);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	glReadPixels(0, 0, bm_w, bm_h, GL_RGB, GL_UNSIGNED_BYTE, begin_byte_buffer);
+	glPixelStorei(GL_PACK_ALIGNMENT, old_pack_alignment);
 #else
+	const unsigned bm_w = ((bitmap.bm_w + 3) & ~3);
+	const unsigned bm_h = ((bitmap.bm_h + 3) & ~3);
 	const unsigned bufsize = bitmap.bm_rowsize * bm_h;
 	const auto begin_byte_buffer = bitmap.bm_mdata;
 #endif

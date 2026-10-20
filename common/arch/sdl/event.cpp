@@ -12,6 +12,8 @@
  */
 
 #include <ranges>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <SDL.h>
 #include <stdio.h>
@@ -46,6 +48,11 @@ bool touch_intro_skipped = false;
 SDL_Sensor *gyro_sensor = nullptr;
 bool gyro_requested = false;
 SDL_DisplayOrientation gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+std::array<float, 3> gyro_deflection{};
+Uint64 gyro_last_sample = 0;
+Uint64 gyro_suspended_until = 0;
+bool app_backgrounded = false;
+bool app_window_active = true;
 
 struct mobile_skip_rect { float x, y, width, height; };
 
@@ -80,8 +87,17 @@ bool gyro_enabled()
 
 void mobile_gyro_set_requested(bool requested)
 {
+	if (requested != gyro_requested)
+		mobile_gyro_recenter();
 	if (!requested)
+	{
 		gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+		if (gyro_sensor)
+		{
+			SDL_SensorClose(gyro_sensor);
+			gyro_sensor = nullptr;
+		}
+	}
 	gyro_requested = requested;
 }
 
@@ -90,16 +106,34 @@ bool mobile_gyro_is_active()
 	return touch_gameplay_active && gyro_enabled();
 }
 
-bool mobile_gyro_get_rates(float (&rates)[3])
+void mobile_gyro_recenter()
+{
+	gyro_deflection = {};
+	gyro_last_sample = 0;
+	gyro_suspended_until = 0;
+}
+
+bool mobile_gyro_get_deflections(float (&deflections)[3])
 {
 	if (!touch_gameplay_active || !gyro_enabled())
 		return false;
+	const Uint64 now = SDL_GetPerformanceCounter();
+	const Uint64 frequency = SDL_GetPerformanceFrequency();
+	const float elapsed = gyro_last_sample && frequency
+		? std::min(0.05f, static_cast<float>(now - gyro_last_sample) / frequency)
+		: 0.f;
+	gyro_last_sample = now;
+	if (now < gyro_suspended_until)
+	{
+		deflections[0] = deflections[1] = deflections[2] = 0.f;
+		return true;
+	}
 	SDL_SensorUpdate();
 	float device_rates[3]{};
 	if (SDL_SensorGetData(gyro_sensor, device_rates, 3))
 		return false;
-	// SDL sensor axes stay in portrait coordinates.  Lock the mapping when
-	// gyro mode starts so tilting the phone cannot swap pitch and yaw mid-turn.
+	// Integrate angular velocity into a virtual stick position.  The phone's
+	// position when gyro mode starts (or CENTER is pressed) is neutral.
 	if (gyro_orientation == SDL_ORIENTATION_UNKNOWN)
 	{
 		gyro_orientation = SDL_GetDisplayOrientation(0);
@@ -111,6 +145,7 @@ bool mobile_gyro_get_rates(float (&rates)[3])
 				? SDL_ORIENTATION_LANDSCAPE_FLIPPED : SDL_ORIENTATION_LANDSCAPE;
 		}
 	}
+	float rates[3]{};
 	switch (gyro_orientation)
 	{
 		case SDL_ORIENTATION_LANDSCAPE:
@@ -118,8 +153,11 @@ bool mobile_gyro_get_rates(float (&rates)[3])
 			rates[1] = device_rates[0];
 			break;
 		case SDL_ORIENTATION_LANDSCAPE_FLIPPED:
-			rates[0] = device_rates[1];
-			rates[1] = -device_rates[0];
+			// Keep pitch and heading in the same screen-relative direction as
+			// Landscape.  On device, reversing these axes here reverses both
+			// controls after the interface rotates to the opposite landscape.
+			rates[0] = -device_rates[1];
+			rates[1] = device_rates[0];
 			break;
 		case SDL_ORIENTATION_PORTRAIT_FLIPPED:
 			rates[0] = -device_rates[0];
@@ -131,6 +169,13 @@ bool mobile_gyro_get_rates(float (&rates)[3])
 			break;
 	}
 	rates[2] = device_rates[2];
+	for (unsigned i = 0; i != 3; ++i)
+	{
+		// Ignore the small stationary bias without changing a held tilt.
+		if (std::abs(rates[i]) > 0.02f)
+			gyro_deflection[i] += rates[i] * elapsed;
+		deflections[i] = gyro_deflection[i];
+	}
 	return true;
 }
 
@@ -146,12 +191,14 @@ bool mobile_touch_intro_was_skipped()
 	return touch_intro_skipped;
 }
 
-void mobile_touch_set_gameplay(bool active, bool descent2)
+void mobile_touch_set_gameplay(bool active, bool descent2, const mobile_touch_action_callback action_callback)
 {
+	touch_controls.set_action_callback(action_callback);
 	if (!active)
 	{
 		touch_controls.release_all();
 		gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+		mobile_gyro_recenter();
 	}
 	touch_controls.set_descent2(descent2);
 	touch_gameplay_active = active;
@@ -224,6 +271,44 @@ struct event_poll_state
 }
 
 #if SDL_MAJOR_VERSION == 2
+static bool apple_mobile_app_inactive()
+{
+	const auto platform = SDL_GetPlatform();
+	if (std::strcmp(platform, "iOS") && std::strcmp(platform, "tvOS"))
+		return false;
+	return app_backgrounded || !app_window_active;
+}
+
+static void update_mobile_window_activation()
+{
+	const auto platform = SDL_GetPlatform();
+	const bool is_ios = !std::strcmp(platform, "iOS");
+	if (!is_ios && std::strcmp(platform, "tvOS"))
+		return;
+	const bool should_be_active = !app_backgrounded && app_window_active;
+	static bool was_active = true;
+	if (should_be_active == was_active)
+		return;
+	was_active = should_be_active;
+	if (!should_be_active)
+	{
+		if (is_ios)
+		{
+			touch_controls.release_all();
+			gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+			mobile_gyro_recenter();
+		}
+		if (auto *const front = window_get_front())
+			front->send_event(d_event{event_type::window_deactivated});
+	}
+	else
+	{
+		timer_reset();
+		if (auto *const front = window_get_front())
+			front->send_event(d_event{event_type::window_activated});
+	}
+}
+
 static void windowevent_handler(const SDL_WindowEvent &windowevent)
 {
 	switch (windowevent.event)
@@ -234,6 +319,16 @@ static void windowevent_handler(const SDL_WindowEvent &windowevent)
 				event_send(e);
 				break;
 			}
+		case SDL_WINDOWEVENT_FOCUS_LOST:
+		case SDL_WINDOWEVENT_MINIMIZED:
+		case SDL_WINDOWEVENT_HIDDEN:
+			app_window_active = false;
+			update_mobile_window_activation();
+			break;
+		case SDL_WINDOWEVENT_FOCUS_GAINED:
+			app_window_active = true;
+			update_mobile_window_activation();
+			break;
 	}
 }
 #endif
@@ -279,7 +374,11 @@ window_event_result event_poll()
 			break;
 	}
 	// Send the idle event if there were no other events (or they were ignored)
-	if (state.highest_result == window_event_result::ignored)
+	if (state.highest_result == window_event_result::ignored
+#if SDL_MAJOR_VERSION == 2
+		&& !apple_mobile_app_inactive()
+#endif
+	)
 	{
 		const d_event ievent{event_type::idle};
 		state.highest_result = std::max(event_send(ievent), state.highest_result);
@@ -304,6 +403,64 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 #if SDL_MAJOR_VERSION == 2
 			case SDL_WINDOWEVENT:
 				windowevent_handler(event.window);
+				continue;
+			case SDL_APP_WILLENTERBACKGROUND:
+			case SDL_APP_DIDENTERBACKGROUND:
+			{
+				const auto platform = SDL_GetPlatform();
+				const bool is_ios = !std::strcmp(platform, "iOS");
+				if (is_ios || !std::strcmp(platform, "tvOS"))
+				{
+#ifdef DXX_BUILD_DESCENT
+					const bool first_background_event = !app_backgrounded;
+#endif
+					app_backgrounded = true;
+					if (is_ios)
+					{
+						touch_controls.release_all();
+						gyro_orientation = SDL_ORIENTATION_UNKNOWN;
+						mobile_gyro_recenter();
+						if (gyro_sensor)
+						{
+							SDL_SensorClose(gyro_sensor);
+							gyro_sensor = nullptr;
+						}
+					}
+#ifdef DXX_BUILD_DESCENT
+					if (first_background_event)
+						dsx::WriteConfigFile(CGameCfg, dsx::GameCfg);
+#endif
+					update_mobile_window_activation();
+				}
+				continue;
+			}
+			case SDL_APP_WILLENTERFOREGROUND:
+			case SDL_APP_DIDENTERFOREGROUND:
+			{
+				const auto platform = SDL_GetPlatform();
+				if (!std::strcmp(platform, "iOS") || !std::strcmp(platform, "tvOS"))
+				{
+					app_backgrounded = false;
+					timer_reset();
+					update_mobile_window_activation();
+				}
+				continue;
+			}
+			case SDL_DISPLAYEVENT:
+				if (!std::strcmp(SDL_GetPlatform(), "iOS") && event.display.event == SDL_DISPLAYEVENT_ORIENTATION)
+				{
+					const auto orientation = static_cast<SDL_DisplayOrientation>(event.display.data1);
+					if (orientation == SDL_ORIENTATION_LANDSCAPE || orientation == SDL_ORIENTATION_LANDSCAPE_FLIPPED)
+					{
+						if (gyro_orientation != SDL_ORIENTATION_UNKNOWN && gyro_orientation != orientation)
+						{
+							mobile_gyro_recenter();
+							gyro_suspended_until = SDL_GetPerformanceCounter() +
+								SDL_GetPerformanceFrequency();
+						}
+						gyro_orientation = orientation;
+						}
+				}
 				continue;
 #endif
 			case SDL_KEYDOWN:
@@ -503,9 +660,19 @@ window_event_result event_process(void)
 	window *wind = window_get_front();
 	window_event_result highest_result;
 
+#if SDL_MAJOR_VERSION == 2
+	if (!apple_mobile_app_inactive())
+		timer_update();
+#else
 	timer_update();
+#endif
 
 	highest_result = event_poll();	// send input events first
+
+#if SDL_MAJOR_VERSION == 2
+	if (apple_mobile_app_inactive())
+		return highest_result;
+#endif
 
 	cmd_queue_process();
 
