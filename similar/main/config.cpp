@@ -29,6 +29,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <string>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -480,13 +481,29 @@ int WriteConfigFile(const CCfg &CGameCfg, const Cfg &GameCfg)
 	const auto current_cfg_text{build_cfg_file_text(CGameCfg, GameCfg)};
 	if (cfg_file_unchanged(current_cfg_text))
 		return 0;
-	auto &&[outfile, physfserr]{PHYSFSX_openWriteBuffered(DXX_DESCENT_CFG_NAME)};
+	const std::string temporary_filename = std::string(DXX_DESCENT_CFG_NAME) + ".tmp";
+	auto &&[outfile, physfserr]{PHYSFSX_openWriteBuffered(temporary_filename.c_str())};
 	if (!outfile)
 	{
 		con_printf(CON_NORMAL, "Failed to write \"" DXX_DESCENT_CFG_NAME "\": %s", PHYSFS_getErrorByCode(physfserr));
 		return 1;
 	}
-	PHYSFSX_writeBytes(outfile, current_cfg_text.buf.data(), current_cfg_text.written);
+	const bool written = PHYSFSX_writeBytes(outfile, current_cfg_text.buf.data(), current_cfg_text.written) == current_cfg_text.written;
+	const bool closed = outfile.close();
+	if (!written || !closed)
+	{
+		PHYSFS_delete(temporary_filename.c_str());
+		con_printf(CON_NORMAL, "Failed to finish config write; old config preserved");
+		return 1;
+	}
+	const char *const write_dir = PHYSFS_getWriteDir();
+	if (!write_dir || std::rename((std::string(write_dir) + "/" + temporary_filename).c_str(),
+		(std::string(write_dir) + "/" DXX_DESCENT_CFG_NAME).c_str()) != 0)
+	{
+		PHYSFS_delete(temporary_filename.c_str());
+		con_printf(CON_NORMAL, "Failed to replace config; old config preserved");
+		return 1;
+	}
 	return 0;
 }
 

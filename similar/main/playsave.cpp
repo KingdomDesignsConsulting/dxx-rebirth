@@ -1500,7 +1500,13 @@ void write_player_file()
 	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plx"), static_cast<const char *>(InterfaceUniqueState.PilotName));
 	write_player_dxx(filename);
 	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(InterfaceUniqueState.PilotName));
-	auto file = PHYSFSX_openWriteBuffered(filename).first;
+	const std::string temporary_filename = std::string(filename) + ".tmp";
+	const auto commit_player_file = [&]() {
+		const char *const dir = PHYSFS_getWriteDir();
+		return dir && std::rename((std::string(dir) + "/" + temporary_filename).c_str(),
+			(std::string(dir) + "/" + filename).c_str()) == 0;
+	};
+	auto file = PHYSFSX_openWriteBuffered(temporary_filename.c_str()).first;
 	if (!file)
 		return;
 
@@ -1569,8 +1575,10 @@ void write_player_file()
 	if (!file.close())
 		errno_ret = errno;
 
+	if (errno_ret == EZERO && !commit_player_file())
+		errno_ret = errno ? errno : EIO;
 	if (errno_ret != EZERO) {
-		PHYSFS_delete(filename);			//delete bogus file
+		PHYSFS_delete(temporary_filename.c_str());			//delete bogus file
 		nm_messagebox(menu_title{TXT_ERROR}, {TXT_OK}, "%s\n\n%s",TXT_ERROR_WRITING_PLR, strerror(errno_ret));
 	}
 #elif DXX_BUILD_DESCENT == 2
@@ -1655,16 +1663,15 @@ void write_player_file()
 
 	if (!file.close())
 		goto write_player_file_failed;
+	if (!commit_player_file())
+		goto write_player_file_failed;
 
 	return;
 
  write_player_file_failed:
 	nm_messagebox(menu_title{TXT_ERROR}, {TXT_OK}, "%s\n\n%s", TXT_ERROR_WRITING_PLR, PHYSFS_getLastError());
-	if (file)
-	{
-		file.reset();
-		PHYSFS_delete(filename);        //delete bogus file
-	}
+	file.reset();
+	PHYSFS_delete(temporary_filename.c_str());
 #endif
 }
 
