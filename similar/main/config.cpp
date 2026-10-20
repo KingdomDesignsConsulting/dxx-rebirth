@@ -262,34 +262,49 @@ void ReadConfigFile(CCfg &CGameCfg, Cfg &GameCfg)
 	CGameCfg.CMLevelMusicTrack[1] = -1;
 	CGameCfg.CMLevelMusicPath = {};
 	CGameCfg.CMMiscMusic = {};
-#if defined(__APPLE__) && TARGET_OS_IOS && DXX_USE_SDLMIXER
-	// The iOS bundle supplies the licensed CD tracks in a predictable order.
-	// Keep the built-in music when no tracks were packaged.
-	if (PHYSFS_exists("Music/Levels.m3u"))
+#if defined(__APPLE__) && DXX_USE_SDLMIXER
+	// Apple app bundles may include the licensed Redbook soundtrack under Music/.
+	// Prefer that self-contained layout on a fresh config, with game-specific roles.
+	const bool have_packaged_music = PHYSFS_exists("Music/Levels.m3u");
+	if (have_packaged_music)
 	{
 		CGameCfg.MusicType = music_type::Custom;
+		CGameCfg.OrigTrackOrder = true;
 		CGameCfg.CMLevelMusicPlayOrder = LevelMusicPlayOrder::Level;
 		CGameCfg.CMLevelMusicPath = "Music/Levels.m3u";
-		CGameCfg.CMMiscMusic[song_number::title] = "Music/title.mp3";
-		CGameCfg.CMMiscMusic[song_number::briefing] = "Music/briefing.mp3";
+		if (PHYSFS_exists("Music/title.mp3"))
+			CGameCfg.CMMiscMusic[song_number::title] = "Music/title.mp3";
+		if (PHYSFS_exists("Music/briefing.mp3"))
+			CGameCfg.CMMiscMusic[song_number::briefing] = "Music/briefing.mp3";
+		if (PHYSFS_exists("Music/endlevel.mp3"))
+			CGameCfg.CMMiscMusic[song_number::endlevel] = "Music/endlevel.mp3";
+		if (PHYSFS_exists("Music/endgame.mp3"))
+			CGameCfg.CMMiscMusic[song_number::endgame] = "Music/endgame.mp3";
+		if (PHYSFS_exists("Music/credits.mp3"))
+			CGameCfg.CMMiscMusic[song_number::credits] = "Music/credits.mp3";
 	}
+#else
+	const bool have_packaged_music = false;
 #endif
-#if defined(__APPLE__) && defined(__MACH__) && !TARGET_OS_IOS
-	CGameCfg.OrigTrackOrder = true;
-	const auto userdir = PHYSFS_getUserDir();
+#if defined(__APPLE__) && defined(__MACH__) && !TARGET_OS_IOS && !TARGET_OS_TV
+	if (!have_packaged_music)
+	{
+		CGameCfg.OrigTrackOrder = true;
+		const auto userdir = PHYSFS_getUserDir();
 #if DXX_BUILD_DESCENT == 1
-	CGameCfg.CMLevelMusicPlayOrder = LevelMusicPlayOrder::Level;
-	CGameCfg.CMLevelMusicPath = "descent.m3u";
-	snprintf(CGameCfg.CMMiscMusic[song_number::title].data(), CGameCfg.CMMiscMusic[song_number::title].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/02 Primitive Rage.mp3");
-	snprintf(CGameCfg.CMMiscMusic[song_number::credits].data(), CGameCfg.CMMiscMusic[song_number::credits].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/05 The Darkness Of Space.mp3");
+		CGameCfg.CMLevelMusicPlayOrder = LevelMusicPlayOrder::Level;
+		CGameCfg.CMLevelMusicPath = "descent.m3u";
+		snprintf(CGameCfg.CMMiscMusic[song_number::title].data(), CGameCfg.CMMiscMusic[song_number::title].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/02 Primitive Rage.mp3");
+		snprintf(CGameCfg.CMMiscMusic[song_number::credits].data(), CGameCfg.CMMiscMusic[song_number::credits].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/05 The Darkness Of Space.mp3");
 #elif DXX_BUILD_DESCENT == 2
-	CGameCfg.CMLevelMusicPath = "descent2.m3u";
-	snprintf(CGameCfg.CMMiscMusic[song_number::title].data(), CGameCfg.CMMiscMusic[song_number::title].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Redbook Soundtrack/Descent II, Macintosh CD-ROM/02 Title.mp3");
-	snprintf(CGameCfg.CMMiscMusic[song_number::credits].data(), CGameCfg.CMMiscMusic[song_number::credits].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Redbook Soundtrack/Descent II, Macintosh CD-ROM/03 Crawl.mp3");
+		CGameCfg.CMLevelMusicPath = "descent2.m3u";
+		snprintf(CGameCfg.CMMiscMusic[song_number::title].data(), CGameCfg.CMMiscMusic[song_number::title].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Redbook Soundtrack/Descent II, Macintosh CD-ROM/02 Title.mp3");
+		snprintf(CGameCfg.CMMiscMusic[song_number::credits].data(), CGameCfg.CMMiscMusic[song_number::credits].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Redbook Soundtrack/Descent II, Macintosh CD-ROM/03 Crawl.mp3");
 #endif
-	snprintf(CGameCfg.CMMiscMusic[song_number::briefing].data(), CGameCfg.CMMiscMusic[song_number::briefing].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/03 Outerlimits.mp3");
-	snprintf(CGameCfg.CMMiscMusic[song_number::endlevel].data(), CGameCfg.CMMiscMusic[song_number::endlevel].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/04 Close Call.mp3");
-	snprintf(CGameCfg.CMMiscMusic[song_number::endgame].data(), CGameCfg.CMMiscMusic[song_number::endgame].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/14 Insanity.mp3");
+		snprintf(CGameCfg.CMMiscMusic[song_number::briefing].data(), CGameCfg.CMMiscMusic[song_number::briefing].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/03 Outerlimits.mp3");
+		snprintf(CGameCfg.CMMiscMusic[song_number::endlevel].data(), CGameCfg.CMMiscMusic[song_number::endlevel].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/04 Close Call.mp3");
+		snprintf(CGameCfg.CMMiscMusic[song_number::endgame].data(), CGameCfg.CMMiscMusic[song_number::endgame].size(), "%s%s", userdir, "Music/iTunes/iTunes Music/Insanity/Descent/14 Insanity.mp3");
+	}
 #endif
 	CGameCfg.GammaLevel = 0;
 	GameCfg.LastPlayer = {};

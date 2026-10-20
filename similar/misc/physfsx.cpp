@@ -60,6 +60,53 @@ static void add_data_directory_to_search_path()
 namespace dsx {
 
 #if DXX_ENABLE_ENVIRONMENT_VARIABLE_DXX_REBIRTH_HOME
+#if defined(__APPLE__) && defined(__MACH__) && (TARGET_OS_IOS || TARGET_OS_TV)
+static void migrate_apple_mobile_legacy_home(const char *const legacy_relative_path, const char *const new_relative_path)
+{
+	const auto user_dir = PHYSFS_getUserDir();
+	if (!user_dir)
+		return;
+
+	std::error_code ec;
+	const std::filesystem::path home{user_dir};
+	const auto legacy = home / legacy_relative_path;
+	const auto destination = home / new_relative_path;
+	if (!std::filesystem::is_directory(legacy, ec) || ec)
+		return;
+	ec.clear();
+	if (std::filesystem::exists(destination, ec))
+		return;
+
+	std::filesystem::create_directories(destination.parent_path(), ec);
+	if (ec)
+	{
+		con_printf(CON_NORMAL, "PHYSFS: cannot create mobile Application Support parent for migration: %s", ec.message().c_str());
+		return;
+	}
+
+	/* Prefer an atomic move.  If the platform/filesystem refuses it, copy the
+	 * complete tree and keep the old directory as a safety backup. */
+	std::filesystem::rename(legacy, destination, ec);
+	if (!ec)
+	{
+		con_printf(CON_NORMAL, "PHYSFS: migrated legacy mobile data directory to Application Support");
+		return;
+	}
+
+	ec.clear();
+	std::filesystem::copy(legacy, destination,
+		std::filesystem::copy_options::recursive | std::filesystem::copy_options::copy_symlinks, ec);
+	if (ec)
+	{
+		con_printf(CON_NORMAL, "PHYSFS: mobile data migration copy failed; continuing with legacy data untouched: %s", ec.message().c_str());
+		std::error_code cleanup_ec;
+		std::filesystem::remove_all(destination, cleanup_ec);
+		return;
+	}
+	con_printf(CON_NORMAL, "PHYSFS: copied legacy mobile data to Application Support; legacy directory retained as backup");
+}
+#endif
+
 static void check_add_environment_rebirth_home(const char *const home_environ_var, const char *const fallback_home_path)
 {
 	char fullPath[PATH_MAX + 5];
@@ -157,7 +204,7 @@ static void setup_final_fallback_write_directory(const char *const base_dir)
 #if defined(__APPLE__) && defined(__MACH__)
 static void setup_osx_resource_path(const char *const base_dir)
 {
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_TV
 	CFBundleRef mainBundle = CFBundleGetMainBundle();
 	if (mainBundle)
 	{
@@ -227,6 +274,17 @@ bool PHYSFSX_init(int argc, char *argv[])
 #endif
 #if !(defined(__APPLE__) && defined(__MACH__))
 #define DXX_FALLBACK_HOME_PATH	"~/.d" DESCENT_PATH_NUMBER "x-rebirth/"
+#elif TARGET_OS_IOS || TARGET_OS_TV
+/* Game data is not a preferences plist.  Keep mobile saves/configuration in
+ * Application Support so iOS/tvOS backup and storage semantics match the
+ * content while preserving the long-standing macOS path for compatibility. */
+#define DXX_FALLBACK_HOME_PATH	"~/Library/Application Support/D" DESCENT_PATH_NUMBER "X Rebirth/"
+	/* This port originally used Library/Preferences for all game files.  Migrate
+	 * only for the default path and only when the new location does not exist,
+	 * so an explicit D?_REBIRTH_HOME override and newer data always win. */
+	if (!getenv("D" DESCENT_PATH_NUMBER "X_REBIRTH_HOME"))
+		migrate_apple_mobile_legacy_home("Library/Preferences/D" DESCENT_PATH_NUMBER "X Rebirth",
+			"Library/Application Support/D" DESCENT_PATH_NUMBER "X Rebirth");
 #else
 #define DXX_FALLBACK_HOME_PATH	"~/Library/Preferences/D" DESCENT_PATH_NUMBER "X Rebirth/"
 #endif

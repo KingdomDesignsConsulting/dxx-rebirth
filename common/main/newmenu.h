@@ -370,6 +370,7 @@ struct newmenu : newmenu_layout, window, mixin_trackable_window
 	{
 	}
 	std::shared_ptr<int> rval;			// Pointer to return value (for polling newmenus)
+	bool tvos_input_selected{false};	// tvOS opens the system text UI only after selection.
 	virtual window_event_result event_handler(const d_event &) override;
 	static int process_until_closed(newmenu *);
 };

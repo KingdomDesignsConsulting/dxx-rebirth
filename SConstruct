@@ -602,8 +602,8 @@ struct A_%(N)s
 		Cxx20RequiredFeature('std::make_unique_for_overwrite', '''
 #include <memory>
 ''', '''
-	std::make_unique_for_overwrite<int>();
-	std::make_unique_for_overwrite<int[]>(1);
+	static_cast<void>(std::make_unique_for_overwrite<int>());
+	static_cast<void>(std::make_unique_for_overwrite<int[]>(1));
 '''),
 		Cxx20RequiredFeature('requires clause', '''
 template <typename T>
@@ -755,8 +755,8 @@ int a_%(N)s = U_%(N)s + 1;
 		Cxx14RequiredFeature('std::make_unique', '''
 #include <memory>
 ''', '''
-	std::make_unique<int>(0);
-	std::make_unique<int[]>(1);
+	static_cast<void>(std::make_unique<int>(0));
+	static_cast<void>(std::make_unique<int[]>(1));
 '''),
 		Cxx11RequiredFeature('std::addressof', '''
 #include <memory>
@@ -3807,6 +3807,11 @@ class DXXCommon(LazyObjectConstructor):
 			if self.raspberrypi in ('mesa',) or self.host_platform in (host_platform.darwin.name, host_platform.ios.name):
 				return True
 			return False
+		def default_macos_add_frameworks(self):
+			if self.host_platform != host_platform.darwin.name:
+				return True
+			return any(os.path.isdir(os.path.join(path, 'SDL2.framework')) for path in (
+				os.path.expanduser('~/Library/Frameworks'), '/Library/Frameworks'))
 		@classmethod
 		def default_verbosebuild(cls):
 			# Enable verbosebuild when the output is not directed to a
@@ -3945,6 +3950,7 @@ class DXXCommon(LazyObjectConstructor):
 							'allowed_values' : platform_allowed_values,
 							}
 						),
+					('apple_mobile_target', 'ios', 'Apple mobile target used with host_platform=ios', {'allowed_values': ('ios', 'tvos')}),
 					('raspberrypi', None, 'build for Raspberry Pi (automatically selects opengles)', {'ignorecase': 2, 'map': {'1':'yes', 'true':'yes', '0':'no', 'false':'no'}, 'allowed_values': ('yes', 'no', 'mesa')}),
 				),
 			},
@@ -3954,6 +3960,7 @@ class DXXCommon(LazyObjectConstructor):
 					('record_sconf_results', False, 'write sconf results to dxxsconf.h'),
 					('git_describe_version', self.__get_has_git_dir(), 'include git --describe in extra_version'),
 					('git_status', True, 'include git status'),
+					('build_metadata', True, 'embed compiler/linker/build-environment metadata in the executable'),
 					('versid_depend_all', False, 'rebuild vers_id.cpp if any object file changes'),
 				),
 			},
@@ -3965,6 +3972,7 @@ class DXXCommon(LazyObjectConstructor):
 					('egl_lib', self.selected_EGL_LIB, 'name of the OpenGL ES Graphics Library to link against'),
 					('prefix', self._default_prefix, 'installation prefix directory (Linux only)'),
 					('sharepath', self.__default_DATA_DIR, 'directory for shared game data'),
+					('macos_deployment_target', None, 'minimum macOS version, for example 13.0'),
 					('lto', None, 'enable link time optimization (choices: "assume-enabled", "assume-disabled", 0 to explicitly disable LTO, positive integer to explicitly enable LTO, or unset to detect based on effective CXXFLAGS)'),
 				),
 			},
@@ -4017,7 +4025,7 @@ class DXXCommon(LazyObjectConstructor):
 					# standard place, if macos_add_frameworks=True,
 					# SCons should find the headers and libraries
 					# automatically.
-					('macos_add_frameworks', True, 'add required frameworks to CPPPATH, FRAMEWORKS, and FRAMEWORKPATH search variables (MacOS only); Homebrew users may want macos_add_frameworks=False'),
+					('macos_add_frameworks', self.default_macos_add_frameworks, 'add required frameworks to CPPPATH, FRAMEWORKS, and FRAMEWORKPATH search variables (MacOS only); defaults to enabled when SDL2.framework is installed'),
 					# This is only examined for Mac OS X targets.
 					#
 					# dylibbundler can have issues on some systems, so
@@ -4333,10 +4341,10 @@ class DXXCommon(LazyObjectConstructor):
 				library_frameworks = os.path.join(os.getenv("HOME"), 'Library/Frameworks')
 				if os.path.isdir(library_frameworks):
 					# The private framework directory exists.  Check
-					# whether the user has a private copy of the SDL
+					# whether the user has a private copy of the SDL2
 					# framework.
 					env.Append(FRAMEWORKPATH = [library_frameworks])
-					SDL_private_framework = os.path.join(library_frameworks, 'SDL.framework/Headers')
+					SDL_private_framework = os.path.join(library_frameworks, 'SDL2.framework/Headers')
 					if os.path.isdir(SDL_private_framework):
 						# Yes, so add its headers to the C preprocessor
 						# path.
@@ -4345,7 +4353,7 @@ class DXXCommon(LazyObjectConstructor):
 					# the C preprocessor path.
 				# Check whether a system-wide SDL framework is
 				# available.
-				SDL_system_framework = '/Library/Frameworks/SDL.framework/Headers'
+				SDL_system_framework = '/Library/Frameworks/SDL2.framework/Headers'
 				if os.path.isdir(SDL_system_framework):
 					env.Append(CPPPATH = [SDL_system_framework])
 			env.Append(
@@ -4353,8 +4361,11 @@ class DXXCommon(LazyObjectConstructor):
 				FRAMEWORKS = ['ApplicationServices', 'Cocoa'],
 				LINKFLAGS = ['-Wl,-rpath,@loader_path/../Frameworks'],	# Allow libraries & frameworks to go in app bundle
 			)
+			if self.user_settings.macos_deployment_target:
+				minimum = f'-mmacosx-version-min={self.user_settings.macos_deployment_target}'
+				env.Append(CXXFLAGS=[minimum], LINKFLAGS=[minimum])
 			if macos_add_frameworks:
-				env.Append(FRAMEWORKS = ['SDL'])
+				env.Append(FRAMEWORKS = ['SDL2'])
 			if self.user_settings.opengl or self.user_settings.opengles:
 				env.Append(
 					CPPDEFINES = [('GL_SILENCE_DEPRECATION',)],
@@ -4364,10 +4375,13 @@ class DXXCommon(LazyObjectConstructor):
 		tools = ('gcc', 'g++', 'applelink')
 		def adjust_environment(self, program, env):
 			if not self.user_settings.sdl2 or not self.user_settings.opengles:
-				raise SCons.Errors.StopError('iOS requires sdl2=1 and opengles=1.')
+				raise SCons.Errors.StopError('Apple mobile builds require sdl2=1 and opengles=1.')
+			frameworks = ['UIKit', 'Foundation', 'OpenGLES', 'QuartzCore', 'CoreGraphics', 'ImageIO', 'MobileCoreServices', 'CoreAudio', 'AudioToolbox', 'AVFoundation', 'CoreMotion', 'GameController', 'Metal', 'CoreHaptics', 'CoreBluetooth']
+			if self.user_settings.apple_mobile_target == 'tvos':
+				frameworks.remove('CoreMotion')
 			env.Append(
 				CPPDEFINES = ['__unix__'],
-				FRAMEWORKS = ['UIKit', 'Foundation', 'OpenGLES', 'QuartzCore', 'CoreGraphics', 'ImageIO', 'MobileCoreServices', 'CoreAudio', 'AudioToolbox', 'AVFoundation', 'CoreMotion', 'GameController', 'Metal', 'CoreHaptics', 'CoreBluetooth'],
+				FRAMEWORKS = frameworks,
 			)
 	# Settings to apply to Linux builds
 	class LinuxPlatformSettings(_PlatformSettings):
@@ -5691,7 +5705,10 @@ class DXXProgram(DXXCommon):
 		if user_settings.editor:
 			objects.extend(self.get_objects_editor())
 			objects.extend(static_archive_construction.get_objects_editor())
-		versid_build_environ = ['CXX', 'CPPFLAGS', 'CXXFLAGS', 'LINKFLAGS']
+		# newdemo.cpp records these symbols unconditionally.  Keep the symbols
+		# defined even when release builds suppress build metadata; in that mode
+		# their values are intentionally empty strings.
+		versid_build_environ = ['CXX', 'CPPFLAGS', 'CXXFLAGS', 'LINKFLAGS', 'CXX_version', 'git_status', 'git_diffstat']
 		versid_cppdefines = env['CPPDEFINES'].copy()
 		extra_version = user_settings.extra_version
 		# Possible results:
@@ -5709,7 +5726,10 @@ class DXXProgram(DXXCommon):
 		get_version_head = StaticSubprocess.get_version_head
 		ld_path = ToolchainInformation.get_tool_path(env, 'ld')[1]
 		_quote_cppdefine_as_char_initializer = self._quote_cppdefine_as_char_initializer
-		versid_cppdefines.extend([_quote_cppdefine_as_char_initializer(k, env.get(k, '')) for k in versid_build_environ])
+		if user_settings.build_metadata:
+			versid_cppdefines.extend([_quote_cppdefine_as_char_initializer(k, env.get(k, '')) for k in ('CXX', 'CPPFLAGS', 'CXXFLAGS', 'LINKFLAGS')])
+		else:
+			versid_cppdefines.extend([_quote_cppdefine_as_char_initializer(k, '') for k in versid_build_environ])
 		if extra_version:
 			# VERSION_EXTRA is special.  Format it as a string so that
 			# it can be pasted into g_descent_version (in vers_id.cpp)
@@ -5718,23 +5738,21 @@ class DXXProgram(DXXCommon):
 			# NOT included in versid_build_environ as an independent
 			# field.
 			versid_cppdefines.append(('DESCENT_VERSION_EXTRA', ','.join(map(str, map(ord, extra_version)))))
-		versid_cppdefines.extend((
-			_quote_cppdefine_as_char_initializer('CXX_version', get_version_head(env['CXX'])),
-			_quote_cppdefine_as_char_initializer('LINK', ld_path.decode()),
-			_quote_cppdefine_as_char_initializer('git_status', git_describe_version.status),
-			_quote_cppdefine_as_char_initializer('git_diffstat', git_describe_version.diffstat_HEAD),
-		))
-		if ld_path:
-			versid_cppdefines.append(
-				_quote_cppdefine_as_char_initializer('LINK_version', get_version_head(ld_path))
-			)
-			versid_build_environ.append('LINK_version')
-		versid_build_environ.extend((
-			'CXX_version',
-			'LINK',
-			'git_status',
-			'git_diffstat',
-		))
+		if user_settings.build_metadata:
+			versid_cppdefines.extend((
+				_quote_cppdefine_as_char_initializer('CXX_version', get_version_head(env['CXX'])),
+				_quote_cppdefine_as_char_initializer('git_status', git_describe_version.status if user_settings.git_status else ''),
+				_quote_cppdefine_as_char_initializer('git_diffstat', git_describe_version.diffstat_HEAD if user_settings.git_status else ''),
+				_quote_cppdefine_as_char_initializer('LINK', ld_path.decode()),
+			))
+			if ld_path:
+				versid_cppdefines.append(
+					_quote_cppdefine_as_char_initializer('LINK_version', get_version_head(ld_path))
+				)
+				versid_build_environ.append('LINK_version')
+			versid_build_environ.extend((
+				'LINK',
+			))
 		versid_cppdefines.append(('DXX_RBE"(A)"', f'"{"".join([f"A({k})" for k in versid_build_environ])}"'))
 		versid_environ = penv.copy()
 		# Direct mode conflicts with __TIME__

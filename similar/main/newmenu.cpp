@@ -1524,9 +1524,15 @@ static void newmenu_create_structure(newmenu_layout &menu, const grs_font &cv_fo
 }
 
 #if SDL_MAJOR_VERSION == 2
-static void set_ios_menu_text_input_rect(const newmenu &menu)
+static bool is_apple_mobile_text_input_platform()
 {
-	if (strcmp(SDL_GetPlatform(), "iOS"))
+	const char *const platform = SDL_GetPlatform();
+	return !strcmp(platform, "iOS") || !strcmp(platform, "tvOS");
+}
+
+static void set_apple_mobile_menu_text_input_rect(const newmenu &menu)
+{
+	if (!is_apple_mobile_text_input_platform())
 		return;
 	auto *const window = SDL_GL_GetCurrentWindow();
 	if (!window)
@@ -1536,8 +1542,8 @@ static void set_ios_menu_text_input_rect(const newmenu &menu)
 	const auto &canvas = menu.parent_canvas.cv_bitmap;
 	if (width <= 0 || height <= 0 || !canvas.bm_w || !canvas.bm_h)
 		return;
-	// SDL's iOS keyboard handler moves the view until this rectangle is above
-	// the keyboard.  Include the whole dialog so the name field stays visible.
+	// SDL's Apple-mobile keyboard handler moves the view until this rectangle is
+	// above the keyboard. Include the whole dialog so the text field stays visible.
 	const SDL_Rect rect{
 		menu.x * width / canvas.bm_w,
 		menu.y * height / canvas.bm_h,
@@ -1547,25 +1553,37 @@ static void set_ios_menu_text_input_rect(const newmenu &menu)
 	SDL_SetTextInputRect(&rect);
 }
 
-static void update_ios_menu_text_input(newmenu &menu)
+static void update_apple_mobile_menu_text_input(newmenu &menu)
 {
-	if (strcmp(SDL_GetPlatform(), "iOS") || window_get_front() != &menu)
+	if (!is_apple_mobile_text_input_platform() || window_get_front() != &menu)
 		return;
 	bool editing = false;
 	if (menu.citem >= 0 && static_cast<std::size_t>(menu.citem) < menu.items.size())
 	{
 		auto &item = *std::next(menu.items.begin(), menu.citem);
-		editing = item.type == nm_type::input ||
-			(item.type == nm_type::input_menu && item.imenu().group == 1);
+		if (!strcmp(SDL_GetPlatform(), "tvOS"))
+			editing = menu.tvos_input_selected &&
+				(item.type == nm_type::input ||
+				 (item.type == nm_type::input_menu && item.imenu().group == 1));
+		else
+			editing = item.type == nm_type::input ||
+				(item.type == nm_type::input_menu && item.imenu().group == 1);
 	}
 	if (editing)
 	{
-		set_ios_menu_text_input_rect(menu);
+		if (!strcmp(SDL_GetPlatform(), "tvOS"))
+			SDL_SetHint("DXX_TVOS_TEXT_PROMPT", menu.subtitle.p ? menu.subtitle.p : menu.title.p);
+		set_apple_mobile_menu_text_input_rect(menu);
 		if (!SDL_IsTextInputActive())
 			SDL_StartTextInput();
 	}
-	else if (SDL_IsTextInputActive())
-		SDL_StopTextInput();
+	else
+	{
+		if (!strcmp(SDL_GetPlatform(), "tvOS"))
+			menu.tvos_input_selected = false;
+		if (SDL_IsTextInputActive())
+			SDL_StopTextInput();
+	}
 }
 #endif
 
@@ -1580,7 +1598,7 @@ static window_event_result newmenu_draw(newmenu *menu)
 		menu->create_structure();
 #if SDL_MAJOR_VERSION == 2
 		if (SDL_IsTextInputActive())
-			set_ios_menu_text_input_rect(*menu);
+			set_apple_mobile_menu_text_input_rect(*menu);
 #endif
 		{
 			gr_init_sub_canvas(menu_canvas, scrn_canvas, menu->x, menu->y, menu->w, menu->h);
@@ -1700,7 +1718,7 @@ window_event_result newmenu::event_handler(const d_event &event)
 			event_toggle_focus(0);
 			key_toggle_repeat(1);
 #if SDL_MAJOR_VERSION == 2
-			update_ios_menu_text_input(*this);
+			update_apple_mobile_menu_text_input(*this);
 #endif
 			break;
 
@@ -1709,7 +1727,7 @@ window_event_result newmenu::event_handler(const d_event &event)
 			key_toggle_repeat(1);
 			mouse_state = 0;
 #if SDL_MAJOR_VERSION == 2
-			if (!strcmp(SDL_GetPlatform(), "iOS"))
+			if (is_apple_mobile_text_input_platform())
 				SDL_StopTextInput();
 #endif
 			break;
@@ -1722,17 +1740,41 @@ window_event_result newmenu::event_handler(const d_event &event)
 			const auto result = newmenu_mouse(event, this, button);
 #if SDL_MAJOR_VERSION == 2
 			if (event.type == event_type::mouse_button_up && result != window_event_result::close && result != window_event_result::deleted)
-				update_ios_menu_text_input(*this);
+				update_apple_mobile_menu_text_input(*this);
 #endif
 			return result;
 		}
 
 		case event_type::key_command:
 		{
+#if SDL_MAJOR_VERSION == 2
+			if (!strcmp(SDL_GetPlatform(), "tvOS") && !tvos_input_selected &&
+				citem >= 0 && static_cast<std::size_t>(citem) < items.size() &&
+				std::next(items.begin(), citem)->type == nm_type::input &&
+				(event_key_get(event) == KEY_ENTER || event_key_get(event) == KEY_PADENTER))
+			{
+				tvos_input_selected = true;
+				update_apple_mobile_menu_text_input(*this);
+				return window_event_result::handled;
+			}
+#endif
 			const auto result = newmenu_key_command(event, this);
 #if SDL_MAJOR_VERSION == 2
 			if (result != window_event_result::close && result != window_event_result::deleted)
-				update_ios_menu_text_input(*this);
+			{
+				if (!strcmp(SDL_GetPlatform(), "tvOS"))
+				{
+					if (citem >= 0 && static_cast<std::size_t>(citem) < items.size())
+					{
+						auto &active_item = *std::next(items.begin(), citem);
+						if (active_item.type == nm_type::input_menu && active_item.imenu().group == 1)
+							tvos_input_selected = true;
+						else if (active_item.type != nm_type::input)
+							tvos_input_selected = false;
+					}
+				}
+				update_apple_mobile_menu_text_input(*this);
+			}
 #endif
 			return result;
 		}
@@ -1744,7 +1786,7 @@ window_event_result newmenu::event_handler(const d_event &event)
 			return newmenu_draw(this);
 		case event_type::window_close:
 #if SDL_MAJOR_VERSION == 2
-			if (!strcmp(SDL_GetPlatform(), "iOS"))
+			if (is_apple_mobile_text_input_platform())
 				SDL_StopTextInput();
 #endif
 			break;

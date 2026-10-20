@@ -28,6 +28,9 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include <cstdint>
 #include "dxxsconf.h"
+#if defined(__APPLE__) && defined(__MACH__)
+#include <TargetConditionals.h>
+#endif
 #include "dsx-ns.h"
 #include "maths.h"
 #include "vecmat.h" //the vector/matrix library
@@ -37,7 +40,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "d_bit_enum.h"
 
 #if DXX_USE_OGL
-#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS) || (defined(TARGET_OS_TV) && TARGET_OS_TV)
 #include <OpenGLES/ES1/gl.h>
 #elif defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>

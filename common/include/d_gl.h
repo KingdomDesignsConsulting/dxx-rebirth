@@ -6,6 +6,9 @@
  */
 
 #include "dxxsconf.h"
+#if defined(__APPLE__) && defined(__MACH__)
+#include <TargetConditionals.h>
+#endif
 #if !DXX_USE_OGL
 #error "This file can only be included in OpenGL enabled builds."
 #endif
@@ -14,7 +17,7 @@
 #include "loadgl.h"
 #else
 #	define GL_GLEXT_LEGACY
-#	if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#	if (defined(TARGET_OS_IOS) && TARGET_OS_IOS) || (defined(TARGET_OS_TV) && TARGET_OS_TV)
 #		include <OpenGLES/ES1/gl.h>
 #		include <OpenGLES/ES1/glext.h>
 #	elif defined(__APPLE__) && defined(__MACH__)

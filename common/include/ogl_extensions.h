@@ -12,8 +12,11 @@
 #pragma once
 
 #include <cstdint>
+#if defined(__APPLE__) && defined(__MACH__)
+#include <TargetConditionals.h>
+#endif
 
-#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS) || (defined(TARGET_OS_TV) && TARGET_OS_TV)
 #include <OpenGLES/ES1/gl.h>
 #elif defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>

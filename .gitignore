@@ -54,3 +54,10 @@ xcuserdata
 # Brewfile installation artifacts
 #################################
 Brewfile.lock.json
+
+# Local architect/auditor coordination artifacts
+/Documentation/Docs (Agent)/
+
+# Reviewed generated Apple TV and persistence-validation build outputs
+/build-tvos-*/
+/build-macos-persist/

@@ -4,7 +4,7 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_TV
 #include <SDL_syswm.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
@@ -17,7 +17,7 @@ struct mobile_safe_insets { float left{}, right{}, top{}, bottom{}; };
 
 inline mobile_safe_insets mobile_get_safe_insets(SDL_Window *window)
 {
-#if defined(__APPLE__) && TARGET_OS_IOS
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_OS_TV)
 	if (!window)
 		return {};
 	SDL_SysWMinfo info{};
