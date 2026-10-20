@@ -1,27 +1,31 @@
-# iOS build
+# Apple mobile builds: iOS and tvOS
 
-The Rebirth source tree builds both Descent 1 and Descent 2 for iPhone and iPad. This uses SDL2, PhysicsFS, SDL2_image, and SDL2_mixer as static iOS libraries. The build script downloads pinned releases into `/private/tmp/rebirth-ios-deps`; it does not add those dependencies or licensed game files to Git.
+The shared source builds Descent 1 and Descent 2 for iPhone/iPad and Apple TV. Requirements: Xcode with the appropriate SDKs, Python 3, CMake, SCons and pkg-config. SDL2 2.32.10, PhysicsFS, SDL2_image and SDL2_mixer are pinned and built statically in a dependency cache. The script verifies archive hashes and patches target-specific SDL UIKit sources for scenes, orientation and tvOS text entry.
 
-Requirements: Xcode with the iOS SDK, CMake, SCons, pkg-config, and licensed data in the repository-local, Git-ignored `private assets` folder. It must contain `D1`, `D2`, `Music/D1`, `Music/D2`, `Icons/D1/Assets.xcassets`, and `Icons/D2/Assets.xcassets`. Use `--data-root` to choose another private data location.
+Licensed data stays in the Git-ignored `private assets` directory: `D1`, `D2`, `Music/D1`, `Music/D2`, and per-game icon catalogs under `Icons`. tvOS may use `Icons/D1/tvOS/Assets.xcassets` and its D2 counterpart, with `AppIcon.brandassets`. These private files are not available from GitHub. Use `--data-root` for another private location.
 
 From the repository root:
 
 ```sh
-python3 scripts/build-ios.py --platform simulator
-python3 scripts/build-ios.py --platform device
+python3 scripts/build-ios.py --target-os ios --platform simulator --cache "$HOME/Library/Caches/dxx-rebirth/apple-deps"
+python3 scripts/build-ios.py --target-os tvos --platform simulator --cache "$HOME/Library/Caches/dxx-rebirth/apple-deps"
+python3 scripts/build-ios.py --target-os ios --platform device --cache "$HOME/Library/Caches/dxx-rebirth/apple-deps"
+python3 scripts/build-ios.py --target-os tvos --platform device --cache "$HOME/Library/Caches/dxx-rebirth/apple-deps"
 ```
 
-The results are `build-ios-simulator/D1X-Rebirth.app`, `build-ios-simulator/D2X-Rebirth.app`, and equivalent device bundles. The simulator bundles need no signing. Device bundles need a matching Apple Development certificate and provisioning profile for installation:
+Outputs are `build-ios-simulator/`, `build-ios-device/`, `build-tvos-simulator/` and `build-tvos-device/`, each containing `D1X-Rebirth.app` and `D2X-Rebirth.app`. A persistent cache avoids dependence on `/tmp` cleanup. A cache compiled at one path should be regenerated when moved because CMake records absolute paths.
+
+Device builds need an Apple Development signing identity and matching platform/bundle-ID profiles to install:
 
 ```sh
-python3 scripts/build-ios.py --platform device \
+python3 scripts/build-ios.py --target-os ios --platform device \
   --signing-identity "Apple Development: Your Name (TEAMID)" \
   --provisioning-profile-d1 /path/to/d1.mobileprovision \
   --provisioning-profile-d2 /path/to/d2.mobileprovision
 ```
 
-The two apps use separate bundle IDs and preferences. The build bundles the licensed `.hog`, `.pig`, `.ham`, and related files at the app root, and copies tracks 04 onward to `Music/Levels` with a numbered playlist. Track 02 is the title song; track 03 is the briefing song. Rebirth selects these tracks by default when the playlist is present. User music settings saved inside each app remain configurable.
+Use `--target-os tvos` with tvOS profiles for Apple TV installation. An unsigned device bundle compiling successfully does not make it installable. Simulator bundles do not need device profiles.
 
-The build compiles each game's `Assets.xcassets/AppIcon.appiconset` from `private assets/Icons/D1` or `private assets/Icons/D2` into its app bundle. The private asset folder is ignored by Git and is not available in a fresh clone.
+Bundle IDs are `org.dxx-rebirth.d1x-ios`, `org.dxx-rebirth.d2x-ios`, and corresponding `-tvos` variants. Mobile profiles/configuration/saves live under each app's Application Support directory; legacy Preferences data is migrated when needed. The bundle contains controller mappings, a privacy manifest, game data and optional music. D1 Redbook roles use tracks 2 title, 3 briefing, 4 endlevel, 5 credits, 6 onward levels and the last track endgame. D2 uses track 2 title, 3 credits and 4 onward levels. Existing music settings remain configurable.
 
-The macOS build continues to use the regular `scons` command. The iOS renderer currently uses OpenGL ES 1.1, which Apple marks as deprecated. Both games have reached the pilot-name screen on iPhone and iPad simulators. Gameplay graphics, touch controls, the software keyboard, and audio still need testing on a physical device.
+The renderer uses deprecated OpenGL ES 1.1. Successful compilation is not full gameplay validation. See `Documentation/Repository-Integration-2026-10-19.md` for build evidence, installation checks, validated persistence scope and remaining work.

@@ -4,9 +4,9 @@ Date: October 19, 2026 (America/Los_Angeles)
 
 ## Status
 
-**IMPLEMENTED — VALIDATION PENDING**
+**PASS for the final two absence-recovery regressions; broader coverage limits remain.**
 
-The canonical implementation includes the final `restore_absent_file()` correction and persistent recovery handling for the two no-original-file rollback-deletion failures found by the second validation. That correction has not been independently validated. PERSIST1-S is not fully tested, approved, or release-ready.
+The canonical implementation includes the final `restore_absent_file()` correction and persistent recovery handling for the two no-original-file rollback-deletion failures found by the second validation. Work subsequently validated the two outstanding regressions against matching source from commit `6557eac20a5d`. This closes those regressions, not every failure mode or release-readiness criterion.
 
 This publication synchronizes `similar/main/state.cpp` from the live canonical Google Drive source and adds this document. It does not introduce a further implementation cycle, run fault injection, or modify real user saves. DGSS save formats and versions are unchanged. The previously published PERSIST1 state serialization checks remain intact; `ai.cpp` and `fireball.cpp` are unchanged by this commit.
 
@@ -59,3 +59,9 @@ The two additional failures were `save-nomain-rollbackdeletefail` and `restore-n
 Independently capture and hash the final canonical revision, then rebuild D1/D2 for macOS, iOS Simulator, and tvOS Simulator. In disposable data only, rerun both no-original-file rollback-deletion regressions and verify original absence, quarantine/marker contents, accurate diagnostics, and transaction blocking after application relaunch. Exercise deletion failure with successful quarantine, deletion plus quarantine failure with successful marker creation, and failure of all recovery mechanisms; preserve evidence of the resulting active and recovery states.
 
 Rerun the ordinary pair-preservation, cancellation, main-open, backup-retention, cleanup, and restart-guard matrix against that exact final revision. Record before/after hashes and surviving artifacts. Separately validate deeper restoration failures under PERSIST3, exception paths, mobile runtime, concurrent access, and interruption/power-loss behavior. These are required future tests, not tests performed by this publication assignment.
+
+## Repository Integration Engineer update — October 19, 2026
+
+[Final two regression report](https://drive.google.com/file/d/130s5lvVV7PS_odzl5g7vXR89_N9YIijP/view): `save-nomain-rollbackdeletefail` and `restore-nolive-rollbackdeletefail` PASS against state.cpp SHA-256 `341c2ea04738284e54a90ebeea59cede3dfa4cc11d69aa7198c6a494fe45e6fa`, matching the published checkpoint. Original absence was restored through quarantine, companion/main hashes preserved where applicable, repeat operations blocked, both processes exited 0. The later complete workspace build passed D1/D2 macOS, iOS simulator/device and tvOS simulator/device compilation. Earlier pending statements and proposed test matrices above describe the historical publication state; they must be read with this update.
+
+Tertiary marker creation after both delete and quarantine rename fail was not runtime tested. Restart guarding was previously tested with an existing backup; restart with the new quarantine records was not separately retested. PERSIST2 and PERSIST3, deeper world-state mutation, exceptions, concurrency and power-loss limits remain open. No further persistence implementation was introduced during integration.

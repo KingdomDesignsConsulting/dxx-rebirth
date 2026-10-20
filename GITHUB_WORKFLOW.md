@@ -44,3 +44,7 @@ Git commits in this checkout were authored as `Kevin Nagel <95175704+KingdomDesi
 6. If a generic fix would help the original project, propose a separate, focused pull request to `dxx-rebirth/dxx-rebirth`. A pull request to upstream is not required for ordinary work on our fork.
 
 GitHub fork and default-branch settings were established for this project already. Do not create another fork merely because a new Codex thread starts.
+
+## Integrated development baseline — October 19, 2026
+
+Repository Integration Engineer reconciled the preserved Drive workspace onto validated checkpoint `6557eac20a5d` without resetting or deleting working source. The integrated code checkpoint is `39887f6b709a038eff9f9ce20d42b58e361f8bcd`; the following documentation commit records the audit. See [integration report](Documentation/Repository-Integration-2026-10-19.md) for commit boundaries, evidence and intentionally retained uncommitted diagnostics. GitHub is the versioned development baseline; Drive remains the editing workspace. Routine builds belong in this main repository. Disposable fault injection belongs in Work’s separate testing checkout. Do not make a working tree clean by deleting legitimate uncommitted work.
