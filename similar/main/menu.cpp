@@ -357,6 +357,10 @@ template void parse_human_readable_time(autosave_interval_type &, const human_re
 
 namespace dsx {
 
+// Implemented in inferno.cpp. Only a successfully loaded pilot lifts the
+// guard against overwriting configuration while recovery remains unresolved.
+void persist2_resume_config_writes_after_pilot_load();
+
 namespace {
 
 struct main_menu : main_menu_items, newmenu
@@ -616,6 +620,10 @@ window_event_result pilot_selection_listbox::callback_handler(const d_event &eve
 			if (read_player_file() != EZERO)
 				return window_event_result::handled;		// abort close!
 
+			// PERSIST2 may have restored descent.cfg while loading this pilot.
+			// Refresh the in-memory generation before updating lastplr.
+			ReadConfigFile(CGameCfg, GameCfg);
+            persist2_resume_config_writes_after_pilot_load();
 			WriteConfigFile(CGameCfg, GameCfg);		// Update lastplr
 			break;
 

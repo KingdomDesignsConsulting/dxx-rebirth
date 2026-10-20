@@ -28,6 +28,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <stdio.h>
 #include <string.h>
 #include <ranges>
+#include <string>
+#include <filesystem>
+#include <fstream>
+#include <array>
 #if !defined(_MSC_VER) && !defined(macintosh)
 #include <unistd.h>
 #endif
@@ -363,10 +367,26 @@ static int convert_pattern_array(const std::span<const char> name, const std::sp
 	return 1;
 }
 
-static void print_pattern_array(PHYSFS_File *fout, const char *name, const std::span<const int> array)
+// Sticky checked text output: positive short writes are errors even when
+// PhysicsFS leaves its error code at success.
+template <typename... A>
+static void p2_printf(bool &ok, PHYSFS_File *f, const char *fmt, A... args)
+{
+    char expected[1024];
+    const int count = std::snprintf(expected, sizeof(expected), fmt, args...);
+    if (count < 0 || static_cast<std::size_t>(count) >= sizeof(expected))
+    { ok = false; return; }
+    if (ok && PHYSFS_writeBytes(f, expected, static_cast<PHYSFS_uint64>(count)) != count) ok = false;
+}
+template <std::size_t N>
+static void p2_literal(bool &ok, PHYSFS_File *f, const char (&value)[N])
+{
+    if (ok && PHYSFSX_puts_literal(f, value) != static_cast<PHYSFS_sint64>(N - 1)) ok = false;
+}
+static void print_pattern_array(bool &ok, PHYSFS_File *fout, const char *name, const std::span<const int> array)
 {
 	for (std::size_t i = 0; i < array.size(); ++i)
-		PHYSFSX_printf(fout,"%s%" DXX_PRI_size_type "=%d\n", name, i, array[i]);
+		p2_printf(ok, fout,"%s%" DXX_PRI_size_type "=%d\n", name, i, array[i]);
 }
 
 static const char *splitword(char *line, char c)
@@ -380,6 +400,9 @@ static const char *splitword(char *line, char c)
 	return p;
 }
 }
+
+// Recovery implementation follows the player configuration reader.
+namespace { static bool persist2_recover_pilot_before_read(const char *plr); }
 
 namespace dsx {
 namespace {
@@ -787,12 +810,23 @@ void plyr_save_stats(const char *const callsign, int kills, int deaths)
 	const auto plr_filename_length{std::snprintf(filename.data(), filename.size(), PLAYER_DIRECTORY_STRING("%.8s.eff"), callsign)};
 	if (plr_filename_length >= filename.size())
 		return;
-	if (RAIIPHYSFS_File f{PHYSFS_openWrite(filename.data())})
-		PHYSFS_writeBytes(f, file_contents.data(), content_length);
-	else
+	const std::string stage = std::string(filename.data()) + ".tmp";
+	auto &&[f, open_error] = PHYSFSX_openWriteBuffered(stage.c_str());
+	if (!f)
 	{
-		const auto pe{PHYSFS_getLastErrorCode()};
-		con_printf(CON_NORMAL, "error: failed to open player effectiveness file for write \"%s\": %s", filename.data(), PHYSFS_getErrorByCode(pe));
+		con_printf(CON_NORMAL, "PERSIST2: failed to stage effectiveness file: %s", PHYSFS_getErrorByCode(open_error));
+		return;
+	}
+	const bool written = PHYSFSX_writeBytes(f, file_contents.data(), content_length) == static_cast<PHYSFS_sint64>(content_length);
+	const bool closed = f.close();
+	const char *const dir = PHYSFS_getWriteDir();
+	const bool published = written && closed && dir &&
+		std::rename((std::string(dir) + "/" + stage).c_str(), (std::string(dir) + "/" + filename.data()).c_str()) == 0;
+	if (!published)
+	{
+		con_printf(CON_NORMAL, "PERSIST2: effectiveness update failed; previous file retained");
+		if (!PHYSFS_delete(stage.c_str()))
+			con_printf(CON_NORMAL, "PERSIST2: effectiveness staging cleanup failed");
 	}
 }
 #endif
@@ -801,12 +835,13 @@ namespace {
 static int write_player_dxx(const char *filename)
 {
 	int rc{0};
+	bool output_ok{true};
 	char tempfile[PATH_MAX];
 
 	strcpy(tempfile,filename);
 	tempfile[strlen(tempfile)-4]=0;
 	strcat(tempfile,".pl$");
-	auto fout = PHYSFSX_openWriteBuffered(tempfile).first;
+	auto &&[fout, open_error] = PHYSFSX_openWriteBuffered(tempfile);
 	if (!fout && CGameArg.SysUsePlayersDir)
 	{
 		PHYSFS_mkdir(PLAYER_DIRECTORY_STRING(""));	//try making directory
@@ -815,47 +850,47 @@ static int write_player_dxx(const char *filename)
 	
 	if(fout)
 	{
-		PHYSFSX_puts_literal(fout,
+		p2_literal(output_ok, fout,
 							PLX_OPTION_HEADER_TEXT "\n"
 #if DXX_BUILD_DESCENT == 1
 							WEAPON_REORDER_HEADER_TEXT "\n"
 #endif
 			);
 #if DXX_BUILD_DESCENT == 1
-		PHYSFSX_printf(fout,
+		p2_printf(output_ok, fout,
 					WEAPON_REORDER_PRIMARY_NAME_TEXT "=" WEAPON_REORDER_PRIMARY_VALUE_TEXT "\n"
 					WEAPON_REORDER_SECONDARY_NAME_TEXT "=" WEAPON_REORDER_SECONDARY_VALUE_TEXT "\n",
 					underlying_value(PlayerCfg.PrimaryOrder[0]), underlying_value(PlayerCfg.PrimaryOrder[1]), underlying_value(PlayerCfg.PrimaryOrder[2]), underlying_value(PlayerCfg.PrimaryOrder[3]), underlying_value(PlayerCfg.PrimaryOrder[4]), underlying_value(PlayerCfg.PrimaryOrder[5]),
 					underlying_value(PlayerCfg.SecondaryOrder[0]), underlying_value(PlayerCfg.SecondaryOrder[1]), underlying_value(PlayerCfg.SecondaryOrder[2]), underlying_value(PlayerCfg.SecondaryOrder[3]), underlying_value(PlayerCfg.SecondaryOrder[4]), underlying_value(PlayerCfg.SecondaryOrder[5]));
 #endif
-		PHYSFSX_puts_literal(fout,
+		p2_literal(output_ok, fout,
 #if DXX_BUILD_DESCENT == 1
 							END_TEXT "\n"
 #endif
 							KEYBOARD_HEADER_TEXT "\n");
-		print_pattern_array(fout, SENSITIVITY_NAME_TEXT, PlayerCfg.KeyboardSens);
-		PHYSFSX_puts_literal(fout,
+		print_pattern_array(output_ok, fout, SENSITIVITY_NAME_TEXT, PlayerCfg.KeyboardSens);
+		p2_literal(output_ok, fout,
 							END_TEXT "\n"
 							JOYSTICK_HEADER_TEXT "\n"
 							);
-		print_pattern_array(fout, SENSITIVITY_NAME_TEXT, PlayerCfg.JoystickSens);
-		print_pattern_array(fout, LINEAR_NAME_TEXT, PlayerCfg.JoystickLinear);
-		print_pattern_array(fout, SPEED_NAME_TEXT, PlayerCfg.JoystickSpeed);
-		print_pattern_array(fout, DEADZONE_NAME_TEXT, PlayerCfg.JoystickDead);
-		PHYSFSX_puts_literal(fout,
+		print_pattern_array(output_ok, fout, SENSITIVITY_NAME_TEXT, PlayerCfg.JoystickSens);
+		print_pattern_array(output_ok, fout, LINEAR_NAME_TEXT, PlayerCfg.JoystickLinear);
+		print_pattern_array(output_ok, fout, SPEED_NAME_TEXT, PlayerCfg.JoystickSpeed);
+		print_pattern_array(output_ok, fout, DEADZONE_NAME_TEXT, PlayerCfg.JoystickDead);
+		p2_literal(output_ok, fout,
 							END_TEXT "\n"
 							MOUSE_HEADER_TEXT "\n"
 							);
-		PHYSFSX_printf(fout,MOUSE_FLIGHTSIM_NAME_TEXT "=" MOUSE_FLIGHTSIM_VALUE_TEXT "\n",PlayerCfg.MouseFlightSim);
-		print_pattern_array(fout, SENSITIVITY_NAME_TEXT, PlayerCfg.MouseSens);
-                print_pattern_array(fout, MOUSE_OVERRUN_NAME_TEXT, PlayerCfg.MouseOverrun);
-		PHYSFSX_printf(fout,MOUSE_FSDEAD_NAME_TEXT "=" MOUSE_FSDEAD_VALUE_TEXT "\n",PlayerCfg.MouseFSDead);
-		PHYSFSX_printf(fout,MOUSE_FSINDICATOR_NAME_TEXT "=" MOUSE_FSINDICATOR_VALUE_TEXT "\n",PlayerCfg.MouseFSIndicator);
-		PHYSFSX_puts_literal(fout,
+		p2_printf(output_ok, fout,MOUSE_FLIGHTSIM_NAME_TEXT "=" MOUSE_FLIGHTSIM_VALUE_TEXT "\n",PlayerCfg.MouseFlightSim);
+		print_pattern_array(output_ok, fout, SENSITIVITY_NAME_TEXT, PlayerCfg.MouseSens);
+                print_pattern_array(output_ok, fout, MOUSE_OVERRUN_NAME_TEXT, PlayerCfg.MouseOverrun);
+		p2_printf(output_ok, fout,MOUSE_FSDEAD_NAME_TEXT "=" MOUSE_FSDEAD_VALUE_TEXT "\n",PlayerCfg.MouseFSDead);
+		p2_printf(output_ok, fout,MOUSE_FSINDICATOR_NAME_TEXT "=" MOUSE_FSINDICATOR_VALUE_TEXT "\n",PlayerCfg.MouseFSIndicator);
+		p2_literal(output_ok, fout,
 							END_TEXT "\n"
 							WEAPON_KEYv2_HEADER_TEXT "\n"
 							);
-		PHYSFSX_printf(fout,"1=" WEAPON_KEYv2_VALUE_TEXT "\n"
+		p2_printf(output_ok, fout,"1=" WEAPON_KEYv2_VALUE_TEXT "\n"
 			"2=" WEAPON_KEYv2_VALUE_TEXT "\n"
 			"3=" WEAPON_KEYv2_VALUE_TEXT "\n"
 			"4=" WEAPON_KEYv2_VALUE_TEXT "\n"
@@ -875,64 +910,72 @@ static int write_player_dxx(const char *filename)
 			PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{21})], PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{22})], PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{23})],
 			PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{24})], PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{25})], PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{26})],
 			PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{27})], PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{28})], PlayerCfg.KeySettingsRebirth[(dxx_kconfig_ui_kc_rebirth{29})]);
-		PHYSFSX_puts_literal(fout,
+		p2_literal(output_ok, fout,
 							END_TEXT "\n"
 							COCKPIT_HEADER_TEXT "\n"
 							);
 #if DXX_BUILD_DESCENT == 1
-		PHYSFSX_printf(fout, COCKPIT_MODE_NAME_TEXT "=%i\n", underlying_value(PlayerCfg.CockpitMode[0]));
+		p2_printf(output_ok, fout, COCKPIT_MODE_NAME_TEXT "=%i\n", underlying_value(PlayerCfg.CockpitMode[0]));
 #endif
-		PHYSFSX_printf(fout,COCKPIT_HUD_NAME_TEXT "=%u\n", static_cast<unsigned>(PlayerCfg.HudMode));
-		PHYSFSX_printf(fout,COCKPIT_RETICLE_TYPE_NAME_TEXT "=%i\n", underlying_value(PlayerCfg.ReticleType));
-		PHYSFSX_printf(fout,COCKPIT_RETICLE_COLOR_NAME_TEXT "=%i,%i,%i,%i\n",PlayerCfg.ReticleRGBA[0],PlayerCfg.ReticleRGBA[1],PlayerCfg.ReticleRGBA[2],PlayerCfg.ReticleRGBA[3]);
-		PHYSFSX_printf(fout,COCKPIT_RETICLE_SIZE_NAME_TEXT "=%i\n",PlayerCfg.ReticleSize);
-		PHYSFSX_puts_literal(fout,
+		p2_printf(output_ok, fout,COCKPIT_HUD_NAME_TEXT "=%u\n", static_cast<unsigned>(PlayerCfg.HudMode));
+		p2_printf(output_ok, fout,COCKPIT_RETICLE_TYPE_NAME_TEXT "=%i\n", underlying_value(PlayerCfg.ReticleType));
+		p2_printf(output_ok, fout,COCKPIT_RETICLE_COLOR_NAME_TEXT "=%i,%i,%i,%i\n",PlayerCfg.ReticleRGBA[0],PlayerCfg.ReticleRGBA[1],PlayerCfg.ReticleRGBA[2],PlayerCfg.ReticleRGBA[3]);
+		p2_printf(output_ok, fout,COCKPIT_RETICLE_SIZE_NAME_TEXT "=%i\n",PlayerCfg.ReticleSize);
+		p2_literal(output_ok, fout,
 							END_TEXT "\n"
 							TOGGLES_HEADER_TEXT "\n"
 							);
 #if DXX_BUILD_DESCENT == 1
-		PHYSFSX_printf(fout,TOGGLES_BOMBGAUGE_NAME_TEXT "=%i\n",PlayerCfg.BombGauge);
+		p2_printf(output_ok, fout,TOGGLES_BOMBGAUGE_NAME_TEXT "=%i\n",PlayerCfg.BombGauge);
 #elif DXX_BUILD_DESCENT == 2
-		PHYSFSX_printf(fout,TOGGLES_ESCORTHOTKEYS_NAME_TEXT "=%i\n",PlayerCfg.EscortHotKeys);
-		PHYSFSX_printf(fout, TOGGLES_THIEF_ABSENCE_SP "=%i\n", PlayerCfg.ThiefModifierFlags & ThiefModifier::Absent);
-		PHYSFSX_printf(fout, TOGGLES_THIEF_NO_ENERGY_WEAPONS_SP "=%i\n", PlayerCfg.ThiefModifierFlags & ThiefModifier::NoEnergyWeapons);
+		p2_printf(output_ok, fout,TOGGLES_ESCORTHOTKEYS_NAME_TEXT "=%i\n",PlayerCfg.EscortHotKeys);
+		p2_printf(output_ok, fout, TOGGLES_THIEF_ABSENCE_SP "=%i\n", PlayerCfg.ThiefModifierFlags & ThiefModifier::Absent);
+		p2_printf(output_ok, fout, TOGGLES_THIEF_NO_ENERGY_WEAPONS_SP "=%i\n", PlayerCfg.ThiefModifierFlags & ThiefModifier::NoEnergyWeapons);
 #endif
-		PHYSFSX_printf(fout, TOGGLES_AUTOSAVE_INTERVAL_SP "=%i\n", PlayerCfg.SPGameplayOptions.AutosaveInterval.count());
-		PHYSFSX_printf(fout,TOGGLES_PERSISTENTDEBRIS_NAME_TEXT "=%i\n",PlayerCfg.PersistentDebris);
-		PHYSFSX_printf(fout,TOGGLES_PRSHOT_NAME_TEXT "=%i\n",PlayerCfg.PRShot);
-		PHYSFSX_printf(fout,TOGGLES_NOREDUNDANCY_NAME_TEXT "=%i\n",PlayerCfg.NoRedundancy);
-		PHYSFSX_printf(fout,TOGGLES_MULTIMESSAGES_NAME_TEXT "=%i\n",PlayerCfg.MultiMessages);
-		PHYSFSX_printf(fout,TOGGLES_MULTIPINGHUD_NAME_TEXT "=%i\n",PlayerCfg.MultiPingHud);
-		PHYSFSX_printf(fout,TOGGLES_NORANKINGS_NAME_TEXT "=%i\n",PlayerCfg.NoRankings);
-		PHYSFSX_printf(fout,TOGGLES_AUTOMAPFREEFLIGHT_NAME_TEXT "=%i\n",PlayerCfg.AutomapFreeFlight);
-		PHYSFSX_printf(fout,TOGGLES_NOFIREAUTOSELECT_NAME_TEXT "=%i\n",static_cast<unsigned>(PlayerCfg.NoFireAutoselect));
-		PHYSFSX_printf(fout,TOGGLES_CYCLEAUTOSELECTONLY_NAME_TEXT "=%i\n",PlayerCfg.CycleAutoselectOnly);
-                PHYSFSX_printf(fout,TOGGLES_CLOAKINVULTIMER_NAME_TEXT "=%i\n",PlayerCfg.CloakInvulTimer);
-		PHYSFSX_printf(fout,TOGGLES_RESPAWN_ANY_KEY "=%i\n",static_cast<unsigned>(PlayerCfg.RespawnMode));
-		PHYSFSX_printf(fout, TOGGLES_MOUSELOOK "=%i\n", PlayerCfg.MouselookFlags);
-		PHYSFSX_printf(fout, TOGGLES_PITCH_LOCK "=%i\n", PlayerCfg.PitchLockFlags);
-		PHYSFSX_puts_literal(fout,
+		p2_printf(output_ok, fout, TOGGLES_AUTOSAVE_INTERVAL_SP "=%i\n", PlayerCfg.SPGameplayOptions.AutosaveInterval.count());
+		p2_printf(output_ok, fout,TOGGLES_PERSISTENTDEBRIS_NAME_TEXT "=%i\n",PlayerCfg.PersistentDebris);
+		p2_printf(output_ok, fout,TOGGLES_PRSHOT_NAME_TEXT "=%i\n",PlayerCfg.PRShot);
+		p2_printf(output_ok, fout,TOGGLES_NOREDUNDANCY_NAME_TEXT "=%i\n",PlayerCfg.NoRedundancy);
+		p2_printf(output_ok, fout,TOGGLES_MULTIMESSAGES_NAME_TEXT "=%i\n",PlayerCfg.MultiMessages);
+		p2_printf(output_ok, fout,TOGGLES_MULTIPINGHUD_NAME_TEXT "=%i\n",PlayerCfg.MultiPingHud);
+		p2_printf(output_ok, fout,TOGGLES_NORANKINGS_NAME_TEXT "=%i\n",PlayerCfg.NoRankings);
+		p2_printf(output_ok, fout,TOGGLES_AUTOMAPFREEFLIGHT_NAME_TEXT "=%i\n",PlayerCfg.AutomapFreeFlight);
+		p2_printf(output_ok, fout,TOGGLES_NOFIREAUTOSELECT_NAME_TEXT "=%i\n",static_cast<unsigned>(PlayerCfg.NoFireAutoselect));
+		p2_printf(output_ok, fout,TOGGLES_CYCLEAUTOSELECTONLY_NAME_TEXT "=%i\n",PlayerCfg.CycleAutoselectOnly);
+                p2_printf(output_ok, fout,TOGGLES_CLOAKINVULTIMER_NAME_TEXT "=%i\n",PlayerCfg.CloakInvulTimer);
+		p2_printf(output_ok, fout,TOGGLES_RESPAWN_ANY_KEY "=%i\n",static_cast<unsigned>(PlayerCfg.RespawnMode));
+		p2_printf(output_ok, fout, TOGGLES_MOUSELOOK "=%i\n", PlayerCfg.MouselookFlags);
+		p2_printf(output_ok, fout, TOGGLES_PITCH_LOCK "=%i\n", PlayerCfg.PitchLockFlags);
+		p2_literal(output_ok, fout,
 							END_TEXT "\n"
 							GRAPHICS_HEADER_TEXT "\n"
 							);
-		PHYSFSX_printf(fout,GRAPHICS_ALPHAEFFECTS_NAME_TEXT "=%i\n",PlayerCfg.AlphaEffects);
-		PHYSFSX_printf(fout,GRAPHICS_DYNLIGHTCOLOR_NAME_TEXT "=%i\n",PlayerCfg.DynLightColor);
-		PHYSFSX_puts_literal(fout, END_TEXT "\n"
+		p2_printf(output_ok, fout,GRAPHICS_ALPHAEFFECTS_NAME_TEXT "=%i\n",PlayerCfg.AlphaEffects);
+		p2_printf(output_ok, fout,GRAPHICS_DYNLIGHTCOLOR_NAME_TEXT "=%i\n",PlayerCfg.DynLightColor);
+		p2_literal(output_ok, fout, END_TEXT "\n"
 							PLX_VERSION_HEADER_TEXT "\n"
 							"plx version=" DXX_VERSION_STR "\n"
 							END_TEXT "\n"
 							END_TEXT "\n"
 							);
-		fout.reset();
-		if(rc==0)
+		// Never delete the existing pilot options before a successful replacement.
+		// A failed write, close, or rename must leave the original intact.
+		if (!fout.close())
+			rc = EIO;
+		if (!output_ok) rc = EIO;
+		if (rc == 0)
 		{
-			PHYSFS_delete(filename);
-			rc = PHYSFSX_rename(tempfile,filename);
+			const char *const dir = PHYSFS_getWriteDir();
+			if (!dir || std::rename((std::string(dir) + "/" + tempfile).c_str(),
+				(std::string(dir) + "/" + filename).c_str()) != 0)
+				rc = errno ? errno : EIO;
 		}
+		if (rc != 0 && !PHYSFS_delete(tempfile))
+			con_printf(CON_NORMAL, "PERSIST2: options staging cleanup failed; residual .pl$ retained");
 		return rc;
 	}
 	else
-		return errno;
+		return open_error == PHYSFS_ERR_OK ? EIO : EACCES;
 }
 }
 
@@ -953,6 +996,8 @@ int read_player_file()
 	std::array<char, sizeof(PLAYER_DIRECTORY_TEXT ".plr") + CALLSIGN_LEN> filename;
 	const auto plr_filename_length{std::snprintf(filename.data(), filename.size(), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(InterfaceUniqueState.PilotName))};
 	if (plr_filename_length >= filename.size())
+		return -1;
+	if (!persist2_recover_pilot_before_read(filename.data()))
 		return -1;
 	auto &&[file, physfserr]{PHYSFSX_openReadBuffered(filename.data())};
 	if (!file)
@@ -1485,6 +1530,193 @@ int get_highest_level(void)
 	return LevelNum;
 }
 
+// Three-file preservation transaction.  A leftover .p2bak/.p2absent is a
+// persistent warning that must be resolved rather than silently overwritten.
+namespace {
+struct persist2_pilot_transaction
+{
+    struct entry { std::filesystem::path active, backup, absent; bool existed{}; };
+    std::array<entry, 3> files;
+    bool ready{}, finished{};
+    static std::array<entry, 3> paths(const char *plx, const char *plr)
+    {
+        std::array<entry, 3> files{};
+        const char *const dir = PHYSFS_getWriteDir();
+        if (!dir) return files;
+        files[0].active = std::filesystem::path(dir) / "descent.cfg";
+        files[1].active = std::filesystem::path(dir) / plx;
+        files[2].active = std::filesystem::path(dir) / plr;
+        for (auto &e : files)
+        {
+            e.backup = e.active.string() + ".p2bak";
+            e.absent = e.active.string() + ".p2absent";
+        }
+        return files;
+    }
+    static std::filesystem::path completion(const std::array<entry, 3> &files)
+    {
+        return files[2].active.string() + ".p2complete";
+    }
+    static bool has_records(const std::array<entry, 3> &files)
+    {
+        std::error_code ec;
+        if (std::filesystem::exists(completion(files), ec) || ec) return true;
+        for (const auto &e : files)
+            if (std::filesystem::exists(e.backup, ec) || ec ||
+                std::filesystem::exists(e.absent, ec) || ec) return true;
+        return false;
+    }
+    static bool finish_records(const std::array<entry, 3> &files)
+    {
+        std::error_code ec;
+        bool ok = true;
+        for (const auto &e : files)
+        {
+            std::filesystem::remove(e.backup, ec);
+            if (ec) { ok = false; ec.clear(); }
+            std::filesystem::remove(e.absent, ec);
+            if (ec) { ok = false; ec.clear(); }
+            std::filesystem::remove(std::filesystem::path(e.active.string()+".p2restore"), ec);
+            if (ec) { ok = false; ec.clear(); }
+        }
+        if (!ok) return false;
+        std::filesystem::remove(completion(files), ec);
+        return !ec;
+    }
+    static bool record_completion(const std::array<entry, 3> &files, char reason)
+    {
+        std::ofstream f(completion(files), std::ios::binary | std::ios::trunc);
+        if (!f.good()) return false;
+        f.put(reason);
+        f.close();
+        return f.good();
+    }
+    static bool recover(const std::array<entry, 3> &files)
+    {
+        std::error_code ec;
+        const auto completion_file = completion(files);
+        if (std::filesystem::exists(completion_file, ec))
+        {
+            // C means the new generation committed; R means old restored.
+            std::ifstream marker(completion_file, std::ios::binary);
+            char state{};
+            marker.get(state);
+            if (!marker || (state != 'C' && state != 'R')) return false;
+            return finish_records(files);
+        }
+        if (ec) return false;
+        for (const auto &e : files)
+        {
+            const bool backed = std::filesystem::exists(e.backup, ec);
+            if (ec) return false;
+            const bool absent = std::filesystem::exists(e.absent, ec);
+            if (ec || backed == absent) return false;
+        }
+        bool ok = true;
+        for (const auto &e : files)
+        {
+            if (std::filesystem::exists(e.backup, ec))
+            {
+                const auto stage = std::filesystem::path(e.active.string() + ".p2restore");
+                std::filesystem::copy_file(e.backup, stage, std::filesystem::copy_options::overwrite_existing, ec);
+                if (!ec) std::filesystem::rename(stage, e.active, ec);
+                if (ec) { ok = false; ec.clear(); }
+            }
+            else
+            {
+                std::filesystem::remove(e.active, ec);
+                if (ec) { ok = false; ec.clear(); }
+            }
+        }
+        if (!ok) return false;
+        if (!record_completion(files, 'R')) return false;
+        return finish_records(files);
+    }
+    explicit persist2_pilot_transaction(const char *plx, const char *plr) : files(paths(plx, plr))
+    {
+        if (files[0].active.empty()) return;
+        if (has_records(files))
+        {
+            con_printf(CON_NORMAL, "PERSIST2: pending recovery record; pilot write blocked");
+            return;
+        }
+        std::error_code ec;
+        for (auto &e : files)
+        {
+            std::filesystem::create_directories(e.active.parent_path(), ec);
+            if (ec) return;
+        }
+        // Do not modify active files until all three records exist.
+        bool prepared = true;
+        for (auto &e : files)
+        {
+            e.existed = std::filesystem::exists(e.active, ec);
+            if (ec) { prepared = false; break; }
+            if (e.existed)
+            {
+                if (!std::filesystem::copy_file(e.active, e.backup, std::filesystem::copy_options::none, ec) || ec)
+                { prepared = false; break; }
+            }
+            else
+            {
+                std::ofstream marker(e.absent, std::ios::binary | std::ios::trunc);
+                if (!marker.good()) { prepared = false; break; }
+                marker.close();
+                if (!marker.good()) { prepared = false; break; }
+            }
+        }
+        if (!prepared)
+        {
+            for (const auto &e : files)
+            {
+                std::filesystem::remove(e.backup, ec);
+                if (ec) { con_printf(CON_NORMAL, "PERSIST2: backup cleanup failed; recovery record retained"); ec.clear(); }
+                std::filesystem::remove(e.absent, ec);
+                if (ec) { con_printf(CON_NORMAL, "PERSIST2: absence marker cleanup failed"); ec.clear(); }
+            }
+            return;
+        }
+        ready = true;
+    }
+    explicit operator bool() const { return ready; }
+    void commit()
+    {
+        if (!record_completion(files, 'C'))
+        {
+            con_printf(CON_NORMAL, "PERSIST2: cannot record completed save; rollback required");
+            return;
+        }
+        finished = true;
+        if (!finish_records(files))
+            con_printf(CON_NORMAL, "PERSIST2: committed, recovery cleanup pending");
+    }
+    ~persist2_pilot_transaction()
+    {
+        if (!ready || finished) return;
+        if (!recover(files))
+            con_printf(CON_NORMAL, "PERSIST2 CRITICAL: incomplete rollback; records retained and pilot load must recover first");
+    }
+};
+
+// Called before reading a selected pilot. Never ingest a known mixed pilot
+// generation while there are unresolved transaction records.
+static bool persist2_recover_pilot_before_read(const char *plr)
+{
+    const std::string name(plr);
+    if (name.size() < 4 || name.substr(name.size()-4) != ".plr") return false;
+    const std::string plx = name.substr(0,name.size()-4) + ".plx";
+    const auto files = persist2_pilot_transaction::paths(plx.c_str(), plr);
+    if (files[0].active.empty()) return false;
+    if (!persist2_pilot_transaction::has_records(files)) return true;
+    if (!persist2_pilot_transaction::recover(files))
+    {
+        con_printf(CON_NORMAL, "PERSIST2 CRITICAL: pilot load refused; unresolved transaction recovery");
+        return false;
+    }
+    return true;
+}
+} // namespace
+
 //write out player's saved games.  returns errno (0 == no error)
 namespace dsx {
 void write_player_file()
@@ -1495,11 +1727,17 @@ void write_player_file()
 	if ( Newdemo_state == ND_STATE_PLAYBACK )
 		return;
 
-	errno_ret = WriteConfigFile(CGameCfg, GameCfg);
-
-	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plx"), static_cast<const char *>(InterfaceUniqueState.PilotName));
-	write_player_dxx(filename);
+	char plx_filename[PATH_MAX];
+	snprintf(plx_filename, sizeof(plx_filename), PLAYER_DIRECTORY_STRING("%.8s.plx"), static_cast<const char *>(InterfaceUniqueState.PilotName));
 	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(InterfaceUniqueState.PilotName));
+	persist2_pilot_transaction transaction(plx_filename, filename);
+	if (!transaction) return;
+	if (WriteConfigFile(CGameCfg, GameCfg) != 0 || write_player_dxx(plx_filename) != 0)
+	{
+		con_printf(CON_NORMAL, "PERSIST2: config/options write failed; restoring previous files");
+		return;
+	}
+	errno_ret = EZERO;
 	const std::string temporary_filename = std::string(filename) + ".tmp";
 	const auto commit_player_file = [&]() {
 		const char *const dir = PHYSFS_getWriteDir();
@@ -1508,97 +1746,104 @@ void write_player_file()
 	};
 	auto file = PHYSFSX_openWriteBuffered(temporary_filename.c_str()).first;
 	if (!file)
+	{
+		con_printf(CON_NORMAL, "PERSIST2: pilot stage open failed; restoring previous files");
 		return;
+	}
 
 	//Write out player's info
-	PHYSFS_writeULE32(file, SAVE_FILE_ID);
+	if (!PHYSFS_writeULE32(file, SAVE_FILE_ID)) goto write_player_file_failed;
 #if DXX_BUILD_DESCENT == 1
-	PHYSFS_writeULE16(file, SAVED_GAME_VERSION);
-	PHYSFS_writeULE16(file, PLAYER_STRUCT_VERSION);
-	PHYSFS_writeSLE32(file, PlayerCfg.NHighestLevels);
-	PHYSFS_writeSLE32(file, underlying_value(PlayerCfg.DefaultDifficulty));
-	PHYSFS_writeSLE32(file, PlayerCfg.AutoLeveling);
+	if (!PHYSFS_writeULE16(file, SAVED_GAME_VERSION)) goto write_player_file_failed;
+	if (!PHYSFS_writeULE16(file, PLAYER_STRUCT_VERSION)) goto write_player_file_failed;
+	if (!PHYSFS_writeSLE32(file, PlayerCfg.NHighestLevels)) goto write_player_file_failed;
+	if (!PHYSFS_writeSLE32(file, underlying_value(PlayerCfg.DefaultDifficulty))) goto write_player_file_failed;
+	if (!PHYSFS_writeSLE32(file, PlayerCfg.AutoLeveling)) goto write_player_file_failed;
 	errno_ret = EZERO;
 
 	//write higest level info
 	if (const auto count{PlayerCfg.NHighestLevels * sizeof(hli)}; PHYSFSX_writeBytes(file, PlayerCfg.HighestLevels, count) != count)
 	{
-		errno_ret = errno;
-		return;
+		errno_ret = EIO;
+		goto write_player_file_failed;
 	}
 
 	if (PHYSFSX_writeBytes(file, saved_games, sizeof(saved_games)) != sizeof(saved_games))
 	{
-		errno_ret = errno;
-		return;
+		errno_ret = EIO;
+		goto write_player_file_failed;
 	}
 
 	range_for (auto &i, PlayerCfg.NetworkMessageMacro)
 		if (PHYSFSX_writeBytes(file, i.data(), i.size()) != i.size())
 		{
-		errno_ret = errno;
-		return;
+		errno_ret = EIO;
+		goto write_player_file_failed;
 	}
 
 	//write kconfig info
 	{
 		if (PHYSFSX_writeBytes(file, PlayerCfg.KeySettings.Keyboard, sizeof(PlayerCfg.KeySettings.Keyboard)) != sizeof(PlayerCfg.KeySettings.Keyboard))
-			errno_ret=errno;
+			errno_ret=EIO;
 #if DXX_MAX_JOYSTICKS
 		auto &KeySettingsJoystick = PlayerCfg.KeySettings.Joystick;
 #else
 		const std::array<uint8_t, MAX_CONTROLS> KeySettingsJoystick{};
 #endif
 		if (PHYSFSX_writeBytes(file, KeySettingsJoystick, sizeof(KeySettingsJoystick)) != sizeof(KeySettingsJoystick))
-			errno_ret=errno;
+			errno_ret=EIO;
 		for (unsigned i = 0; i < MAX_CONTROLS*3; i++)
 			if (PHYSFSX_writeBytes(file, "0", sizeof(ubyte)) != sizeof(ubyte)) // Skip obsolete Flightstick/Thrustmaster/Gravis map fields
-				errno_ret=errno;
+				errno_ret=EIO;
 		if (PHYSFSX_writeBytes(file, PlayerCfg.KeySettings.Mouse, sizeof(PlayerCfg.KeySettings.Mouse)) != sizeof(PlayerCfg.KeySettings.Mouse))
-			errno_ret=errno;
+			errno_ret=EIO;
 		{
 			std::array<uint8_t, MAX_CONTROLS> cyberman{};
 			if (PHYSFSX_writeBytes(file, cyberman.data(), cyberman.size()) != cyberman.size())	// Skip obsolete Cyberman map field
-				errno_ret=errno;
+				errno_ret=EIO;
 		}
 	
 		if(errno_ret == EZERO)
 		{
 			ubyte old_avg_joy_sensitivity{8};
 			if (PHYSFSX_writeBytes(file, &PlayerCfg.ControlType, sizeof(ubyte)) != sizeof(ubyte))
-				errno_ret=errno;
+				errno_ret=EIO;
 			else if (PHYSFSX_writeBytes(file, &old_avg_joy_sensitivity, sizeof(ubyte)) != sizeof(ubyte))
-				errno_ret=errno;
+				errno_ret=EIO;
 		}
 	}
 
 	if (!file.close())
-		errno_ret = errno;
+		errno_ret = EIO;
 
 	if (errno_ret == EZERO && !commit_player_file())
 		errno_ret = errno ? errno : EIO;
-	if (errno_ret != EZERO) {
-		PHYSFS_delete(temporary_filename.c_str());			//delete bogus file
-		nm_messagebox(menu_title{TXT_ERROR}, {TXT_OK}, "%s\n\n%s",TXT_ERROR_WRITING_PLR, strerror(errno_ret));
-	}
+	if (errno_ret != EZERO) goto write_player_file_failed;
+	transaction.commit();
+	return;
+ write_player_file_failed:
+	file.reset();
+	PHYSFS_delete(temporary_filename.c_str());
+	con_printf(CON_NORMAL, "PERSIST2: D1 pilot write aborted, restoring previous files");
+	return;
 #elif DXX_BUILD_DESCENT == 2
 	(void)errno_ret;
-	PHYSFS_writeULE16(file, PLAYER_FILE_VERSION);
+	if (!PHYSFS_writeULE16(file, PLAYER_FILE_VERSION)) goto write_player_file_failed;
 
 	
-	PHYSFS_seek(file,PHYSFS_tell(file)+2*(sizeof(PHYSFS_uint16))); // skip Game_window_w, Game_window_h
-	PHYSFSX_writeU8(file, underlying_value(PlayerCfg.DefaultDifficulty));
-	PHYSFSX_writeU8(file, PlayerCfg.AutoLeveling);
-	PHYSFSX_writeU8(file, PlayerCfg.ReticleType == reticle_type::none ? 0 : 1);
-	PHYSFSX_writeU8(file, underlying_value(PlayerCfg.CockpitMode[0]));
-	PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(PHYSFS_uint8)); // skip Default_display_mode
-	PHYSFSX_writeU8(file, static_cast<uint8_t>(PlayerCfg.MissileViewEnabled));
-	PHYSFSX_writeU8(file, PlayerCfg.HeadlightActiveDefault);
-	PHYSFSX_writeU8(file, PlayerCfg.GuidedInBigWindow);
-	PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(PHYSFS_uint8)); // skip Automap_always_hires
+	if (PHYSFS_tell(file) < 0 || !PHYSFS_seek(file,PHYSFS_tell(file)+2*(sizeof(PHYSFS_uint16)))) goto write_player_file_failed; // skip Game_window_w, Game_window_h
+	if (PHYSFSX_writeU8(file, underlying_value(PlayerCfg.DefaultDifficulty)) != 1) goto write_player_file_failed;
+	if (PHYSFSX_writeU8(file, PlayerCfg.AutoLeveling) != 1) goto write_player_file_failed;
+	if (PHYSFSX_writeU8(file, PlayerCfg.ReticleType == reticle_type::none ? 0 : 1) != 1) goto write_player_file_failed;
+	if (PHYSFSX_writeU8(file, underlying_value(PlayerCfg.CockpitMode[0])) != 1) goto write_player_file_failed;
+	if (PHYSFS_tell(file) < 0 || !PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(PHYSFS_uint8))) goto write_player_file_failed; // skip Default_display_mode
+	if (PHYSFSX_writeU8(file, static_cast<uint8_t>(PlayerCfg.MissileViewEnabled)) != 1) goto write_player_file_failed;
+	if (PHYSFSX_writeU8(file, PlayerCfg.HeadlightActiveDefault) != 1) goto write_player_file_failed;
+	if (PHYSFSX_writeU8(file, PlayerCfg.GuidedInBigWindow) != 1) goto write_player_file_failed;
+	if (PHYSFS_tell(file) < 0 || !PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(PHYSFS_uint8))) goto write_player_file_failed; // skip Automap_always_hires
 
 	//write higest level info
-	PHYSFS_writeULE16(file, PlayerCfg.NHighestLevels);
+	if (!PHYSFS_writeULE16(file, PlayerCfg.NHighestLevels)) goto write_player_file_failed;
 	if (const auto count{sizeof(hli) * PlayerCfg.NHighestLevels}; PHYSFSX_writeBytes(file, PlayerCfg.HighestLevels, count) != count)
 		goto write_player_file_failed;
 
@@ -1639,39 +1884,40 @@ void write_player_file()
 
 		range_for (const unsigned i, xrange(11u))
 		{
-			PHYSFSX_writeBytes(file, &PlayerCfg.PrimaryOrder[i], sizeof(ubyte));
-			PHYSFSX_writeBytes(file, &PlayerCfg.SecondaryOrder[i], sizeof(ubyte));
+			if (PHYSFSX_writeBytes(file, &PlayerCfg.PrimaryOrder[i], sizeof(ubyte)) != sizeof(ubyte)) goto write_player_file_failed;
+			if (PHYSFSX_writeBytes(file, &PlayerCfg.SecondaryOrder[i], sizeof(ubyte)) != sizeof(ubyte)) goto write_player_file_failed;
 		}
 
-		PHYSFS_writeULE32(file, static_cast<unsigned>(PlayerCfg.Cockpit3DView[gauge_inset_window_view::primary]));
-		PHYSFS_writeULE32(file, static_cast<unsigned>(PlayerCfg.Cockpit3DView[gauge_inset_window_view::secondary]));
+		if (!PHYSFS_writeULE32(file, static_cast<unsigned>(PlayerCfg.Cockpit3DView[gauge_inset_window_view::primary]))) goto write_player_file_failed;
+		if (!PHYSFS_writeULE32(file, static_cast<unsigned>(PlayerCfg.Cockpit3DView[gauge_inset_window_view::secondary]))) goto write_player_file_failed;
 
-		PHYSFS_writeULE32(file, PlayerCfg.NetlifeKills);
-		PHYSFS_writeULE32(file, PlayerCfg.NetlifeKilled);
+		if (!PHYSFS_writeULE32(file, PlayerCfg.NetlifeKills)) goto write_player_file_failed;
+		if (!PHYSFS_writeULE32(file, PlayerCfg.NetlifeKilled)) goto write_player_file_failed;
 		int i=get_lifetime_checksum (PlayerCfg.NetlifeKills,PlayerCfg.NetlifeKilled);
-		PHYSFS_writeULE32(file, i);
+		if (!PHYSFS_writeULE32(file, i)) goto write_player_file_failed;
 	}
 
 	//write guidebot name
-	PHYSFSX_writeString(file, PlayerCfg.GuidebotNameReal);
+	if (PHYSFSX_writeString(file, PlayerCfg.GuidebotNameReal) != static_cast<PHYSFS_sint64>(strlen(PlayerCfg.GuidebotNameReal) + 1)) goto write_player_file_failed;
 
 	{
 		char buf[128];
 		strcpy(buf, "DOS joystick");
-		PHYSFSX_writeString(file, buf);		// Write out current joystick for player.
+		if (PHYSFSX_writeString(file, buf) != static_cast<PHYSFS_sint64>(strlen(buf) + 1)) goto write_player_file_failed;		// Write out current joystick for player.
 	}
 
 	if (!file.close())
 		goto write_player_file_failed;
 	if (!commit_player_file())
 		goto write_player_file_failed;
-
+	transaction.commit();
 	return;
 
  write_player_file_failed:
-	nm_messagebox(menu_title{TXT_ERROR}, {TXT_OK}, "%s\n\n%s", TXT_ERROR_WRITING_PLR, PHYSFS_getLastError());
+	con_printf(CON_NORMAL, "PERSIST2: D2 pilot serialization or commit failed; restoring previous files");
 	file.reset();
-	PHYSFS_delete(temporary_filename.c_str());
+	if (!PHYSFS_delete(temporary_filename.c_str()))
+		con_printf(CON_NORMAL, "PERSIST2: pilot staging cleanup failed");
 #endif
 }
 
@@ -1824,46 +2070,62 @@ void write_netgame_profile(const netgame_info *ng)
 {
 	char filename[PATH_MAX];
 	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.ngp"), static_cast<const char *>(InterfaceUniqueState.PilotName));
-	auto file = PHYSFSX_openWriteBuffered(filename).first;
+	const std::string stage = std::string(filename) + ".tmp";
+	auto &&[file, open_error] = PHYSFSX_openWriteBuffered(stage.c_str());
 	if (!file)
+	{
+		con_printf(CON_NORMAL, "PERSIST2: failed to stage netgame profile: %s", PHYSFS_getErrorByCode(open_error));
 		return;
+	}
+	bool output_ok = true;
 
-	PHYSFSX_printf(file, GameNameStr "=%s\n", ng->game_name.data());
-	PHYSFSX_printf(file, GameModeStr "=%i\n", underlying_value(ng->gamemode));
-	PHYSFSX_printf(file, RefusePlayersStr "=%i\n", ng->RefusePlayers);
-	PHYSFSX_printf(file, DifficultyStr "=%i\n", underlying_value(ng->difficulty));
-	PHYSFSX_printf(file, GameFlagsStr "=%i\n", underlying_value(ng->game_flag));
-	PHYSFSX_printf(file, AllowedItemsStr "=%i\n", underlying_value(ng->AllowedItems));
-	PHYSFSX_printf(file, SpawnGrantedItemsStr "=%i\n", underlying_value(ng->SpawnGrantedItems.mask));
-	PHYSFSX_printf(file, DuplicatePrimariesStr "=%" PRIuFAST32 "\n", ng->DuplicatePowerups.get_primary_count());
-	PHYSFSX_printf(file, DuplicateSecondariesStr "=%" PRIuFAST32 "\n", ng->DuplicatePowerups.get_secondary_count());
+	p2_printf(output_ok, file, GameNameStr "=%s\n", ng->game_name.data());
+	p2_printf(output_ok, file, GameModeStr "=%i\n", underlying_value(ng->gamemode));
+	p2_printf(output_ok, file, RefusePlayersStr "=%i\n", ng->RefusePlayers);
+	p2_printf(output_ok, file, DifficultyStr "=%i\n", underlying_value(ng->difficulty));
+	p2_printf(output_ok, file, GameFlagsStr "=%i\n", underlying_value(ng->game_flag));
+	p2_printf(output_ok, file, AllowedItemsStr "=%i\n", underlying_value(ng->AllowedItems));
+	p2_printf(output_ok, file, SpawnGrantedItemsStr "=%i\n", underlying_value(ng->SpawnGrantedItems.mask));
+	p2_printf(output_ok, file, DuplicatePrimariesStr "=%" PRIuFAST32 "\n", ng->DuplicatePowerups.get_primary_count());
+	p2_printf(output_ok, file, DuplicateSecondariesStr "=%" PRIuFAST32 "\n", ng->DuplicatePowerups.get_secondary_count());
 #if DXX_BUILD_DESCENT == 2
-	PHYSFSX_printf(file, DuplicateAccessoriesStr "=%" PRIuFAST32 "\n", ng->DuplicatePowerups.get_accessory_count());
-	PHYSFSX_printf(file, AllowMarkerViewStr "=%i\n", ng->Allow_marker_view);
-	PHYSFSX_printf(file, AlwaysLightingStr "=%i\n", ng->AlwaysLighting);
-	PHYSFSX_printf(file, ThiefAbsenceFlagStr "=%i\n", ng->ThiefModifierFlags & ThiefModifier::Absent);
-	PHYSFSX_printf(file, ThiefNoEnergyWeaponsFlagStr "=%i\n", ng->ThiefModifierFlags & ThiefModifier::NoEnergyWeapons);
-	PHYSFSX_printf(file, AllowGuidebotStr "=%i\n", ng->AllowGuidebot);
+	p2_printf(output_ok, file, DuplicateAccessoriesStr "=%" PRIuFAST32 "\n", ng->DuplicatePowerups.get_accessory_count());
+	p2_printf(output_ok, file, AllowMarkerViewStr "=%i\n", ng->Allow_marker_view);
+	p2_printf(output_ok, file, AlwaysLightingStr "=%i\n", ng->AlwaysLighting);
+	p2_printf(output_ok, file, ThiefAbsenceFlagStr "=%i\n", ng->ThiefModifierFlags & ThiefModifier::Absent);
+	p2_printf(output_ok, file, ThiefNoEnergyWeaponsFlagStr "=%i\n", ng->ThiefModifierFlags & ThiefModifier::NoEnergyWeapons);
+	p2_printf(output_ok, file, AllowGuidebotStr "=%i\n", ng->AllowGuidebot);
 #endif
-	PHYSFSX_printf(file, ShufflePowerupsStr "=%i\n", !!ng->ShufflePowerupSeed);
-	PHYSFSX_printf(file, ShowEnemyNamesStr "=%i\n", ng->ShowEnemyNames);
-	PHYSFSX_printf(file, BrightPlayersStr "=%i\n", ng->BrightPlayers);
-	PHYSFSX_printf(file, InvulAppearStr "=%i\n", ng->InvulAppear);
-	PHYSFSX_printf(file, KillGoalStr "=%i\n", ng->KillGoal);
-	PHYSFSX_printf(file, PlayTimeAllowedStr "=%i\n", std::chrono::duration_cast<std::chrono::duration<int, netgame_info::play_time_allowed_abi_ratio>>(ng->PlayTimeAllowed).count());
-	PHYSFSX_printf(file, ControlInvulTimeStr "=%i\n", ng->control_invul_time);
-	PHYSFSX_printf(file, PacketsPerSecStr "=%i\n", ng->PacketsPerSec);
-	PHYSFSX_printf(file, NoFriendlyFireStr "=%i\n", ng->NoFriendlyFire);
-	PHYSFSX_printf(file, MouselookFlagsStr "=%i\n", ng->MouselookFlags);
-	PHYSFSX_printf(file, PitchLockFlagsStr "=%i\n", ng->PitchLockFlags);
-	PHYSFSX_printf(file, AutosaveIntervalStr "=%i\n", ng->MPGameplayOptions.AutosaveInterval.count());
+	p2_printf(output_ok, file, ShufflePowerupsStr "=%i\n", !!ng->ShufflePowerupSeed);
+	p2_printf(output_ok, file, ShowEnemyNamesStr "=%i\n", ng->ShowEnemyNames);
+	p2_printf(output_ok, file, BrightPlayersStr "=%i\n", ng->BrightPlayers);
+	p2_printf(output_ok, file, InvulAppearStr "=%i\n", ng->InvulAppear);
+	p2_printf(output_ok, file, KillGoalStr "=%i\n", ng->KillGoal);
+	p2_printf(output_ok, file, PlayTimeAllowedStr "=%i\n", std::chrono::duration_cast<std::chrono::duration<int, netgame_info::play_time_allowed_abi_ratio>>(ng->PlayTimeAllowed).count());
+	p2_printf(output_ok, file, ControlInvulTimeStr "=%i\n", ng->control_invul_time);
+	p2_printf(output_ok, file, PacketsPerSecStr "=%i\n", ng->PacketsPerSec);
+	p2_printf(output_ok, file, NoFriendlyFireStr "=%i\n", ng->NoFriendlyFire);
+	p2_printf(output_ok, file, MouselookFlagsStr "=%i\n", ng->MouselookFlags);
+	p2_printf(output_ok, file, PitchLockFlagsStr "=%i\n", ng->PitchLockFlags);
+	p2_printf(output_ok, file, AutosaveIntervalStr "=%i\n", ng->MPGameplayOptions.AutosaveInterval.count());
 #if DXX_USE_TRACKER
-	PHYSFSX_printf(file, TrackerStr "=%i\n", ng->Tracker);
-	PHYSFSX_printf(file, TrackerNATHPStr "=%i\n", ng->TrackerNATWarned);
+	p2_printf(output_ok, file, TrackerStr "=%i\n", ng->Tracker);
+	p2_printf(output_ok, file, TrackerNATHPStr "=%i\n", ng->TrackerNATWarned);
 #else
-	PHYSFSX_puts_literal(file, TrackerStr "=0\n" TrackerNATHPStr "=0\n");
+	p2_literal(output_ok, file, TrackerStr "=0\n" TrackerNATHPStr "=0\n");
 #endif
-	PHYSFSX_puts_literal(file, NGPVersionStr "=" DXX_VERSION_STR "\n");
+	p2_literal(output_ok, file, NGPVersionStr "=" DXX_VERSION_STR "\n");
+	const bool closed = file.close();
+	const char *const dir = PHYSFS_getWriteDir();
+	const bool published = output_ok && closed && dir &&
+		std::rename((std::string(dir) + "/" + stage).c_str(), (std::string(dir) + "/" + filename).c_str()) == 0;
+	if (!published)
+	{
+		con_printf(CON_NORMAL, "PERSIST2: netgame profile update failed; previous file retained");
+		if (!PHYSFS_delete(stage.c_str()))
+			con_printf(CON_NORMAL, "PERSIST2: netgame profile staging cleanup failed");
+	}
+
 }
 #endif
 

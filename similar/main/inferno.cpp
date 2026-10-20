@@ -119,6 +119,15 @@ namespace dsx {
 
 int Screen_mode=-1;					//game screen or editor screen?
 
+// Suppress only writes while the command-line pilot recovery is unresolved.
+// A later successful interactive pilot load restores normal shutdown saving.
+static bool persist2_suppress_final_config_write = false;
+void persist2_resume_config_writes_after_pilot_load()
+{
+    persist2_suppress_final_config_write = false;
+}
+
+
 #if DXX_BUILD_DESCENT == 1
 uint8_t HiresGFXAvailable;
 int MacHog{0};	// using a Mac hogfile?
@@ -727,8 +736,20 @@ static int main(int argc, char *argv[])
 			{
 				InterfaceUniqueState.PilotName.copy(std::span<const char>(b, std::distance(b, &filename[j - 4])));
 				InterfaceUniqueState.update_window_title();
-				read_player_file();
-				WriteConfigFile(CGameCfg, GameCfg);
+				if (read_player_file() == EZERO)
+				{
+					// Recovery may have restored descent.cfg after the initial read.
+					// Reload it before any subsequent write can publish stale values.
+					ReadConfigFile(CGameCfg, GameCfg);
+					WriteConfigFile(CGameCfg, GameCfg);
+				}
+				else
+				{
+					persist2_suppress_final_config_write = true;
+					InterfaceUniqueState.PilotName.copy(std::span<const char>("", 0));
+					InterfaceUniqueState.update_window_title();
+					con_printf(CON_NORMAL, "PERSIST2: command-line pilot load refused; configuration write suppressed");
+				}
 			}
 		}
 	}
@@ -761,7 +782,8 @@ static int main(int argc, char *argv[])
 			window_close(wind);
 	}
 
-	WriteConfigFile(CGameCfg, GameCfg);
+	if (!persist2_suppress_final_config_write)
+		WriteConfigFile(CGameCfg, GameCfg);
 
 	con_puts(CON_DEBUG, "Cleanup...");
 	gamedata_close();
