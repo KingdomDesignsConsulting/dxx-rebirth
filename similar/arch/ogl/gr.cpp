@@ -787,7 +787,9 @@ void gr_set_attributes(void)
 #if SDL_MAJOR_VERSION == 1
 	SDL_GL_SetAttribute(SDL_GL_SWAP_CONTROL, CGameCfg.VSync);
 #elif SDL_MAJOR_VERSION == 2
-	SDL_GL_SetSwapInterval(CGameCfg.VSync ? 1 : 0);
+	/* SDL_GL_SetSwapInterval requires a current context.  The SDL2 context is
+	 * created later in gr_init(), so apply the interval immediately after
+	 * SDL_GL_CreateContext instead of attempting it here. */
 #endif
 	int buffers, samples;
 	if (CGameCfg.Multisample)
@@ -869,6 +871,8 @@ int gr_init()
 	g_pRebirthSDLMainWindow = SDLWindow;
 	if (!SDL_GL_CreateContext(SDLWindow))
 		Error("Failed to create SDL GL context: %s", SDL_GetError());
+	if (SDL_GL_SetSwapInterval(CGameCfg.VSync ? 1 : 0) < 0)
+		con_printf(CON_VERBOSE, "OpenGL: could not set swap interval: %s", SDL_GetError());
 	if (const auto window_icon = SDL_LoadBMP(DXX_SDL_WINDOW_ICON_BITMAP))
 		SDL_SetWindowIcon(SDLWindow, window_icon);
 #endif
@@ -1083,6 +1087,9 @@ static int do_pal_step;
 
 void ogl_do_palfx(void)
 {
+	if (!do_pal_step)
+		return;
+
 	OGL_DISABLE(TEXTURE_2D);
 
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -1092,10 +1099,8 @@ void ogl_do_palfx(void)
 	GLfloat alast_g = last_g;
 	GLfloat alast_b = last_b;
 	
-	if (!do_pal_step) {
-		return;
-	}
-	else if (last_r <= 0 && last_g <= 0 && last_b <= 0) 
+
+	if (last_r <= 0 && last_g <= 0 && last_b <= 0)
 	{
 		// scale negative effect by 2.5 to match D1/D2 on GL
 		// also make values positive to actually have an effect
@@ -1189,7 +1194,11 @@ void write_bmp(PHYSFS_File *const TGAFile, const unsigned w, const unsigned h)
 	const unsigned buffer_size_TGA = w * h * 3;
 	const auto buf = std::make_unique<uint8_t[]>(buffer_size_TGA);
 
+	GLint old_pack_alignment;
+	glGetIntegerv(GL_PACK_ALIGNMENT, &old_pack_alignment);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, buf.get());
+	glPixelStorei(GL_PACK_ALIGNMENT, old_pack_alignment);
 	for (const auto pixel : xrange(w * h))
 		std::swap(buf[pixel * 3], buf[pixel * 3 + 2]);
 
