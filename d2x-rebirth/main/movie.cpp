@@ -327,6 +327,11 @@ window_event_result movie::event_handler(const d_event &event)
 			MVE_rmHoldMovie();
 			break;
 
+		case event_type::mouse_button_down:
+			if (event_mouse_get_button(event) == mbtn::left)
+				return window_event_result::close;
+			break;
+
 #if DXX_MAX_BUTTONS_PER_JOYSTICK
 		case event_type::joystick_button_down:
 		{
@@ -401,7 +406,8 @@ movie_play_status RunMovie(const char *const filename, const std::span<const cha
 	auto &&[filehndl, physfserr]{PHYSFSRWOPS_openRead(filename)};
 	if (!filehndl)
 	{
-		con_printf(warn_missing == play_movie_warn_missing::verbose ? CON_VERBOSE : CON_URGENT, "Failed to open movie <%s>: %s", filename, PHYSFS_getErrorByCode(physfserr));
+		if (warn_missing != play_movie_warn_missing::verbose || physfserr != PHYSFS_ERR_NOT_FOUND)
+			con_printf(warn_missing == play_movie_warn_missing::verbose ? CON_VERBOSE : CON_URGENT, "Failed to open movie <%s>: %s", filename, PHYSFS_getErrorByCode(physfserr));
 		return movie_play_status::skipped;
 	}
 	MVESTREAM_ptr_t mvestream;
@@ -691,7 +697,7 @@ std::unique_ptr<BuiltinMovies> init_movies()
 BuiltinMovies::BuiltinMovies()
 {
 	for (auto &&[f, m] : zip(movielib_files, movies))
-		init_movie(f.data(), 1, m);
+		init_movie(f.data(), 0, m);
 }
 
 LoadedMovie::~LoadedMovie()

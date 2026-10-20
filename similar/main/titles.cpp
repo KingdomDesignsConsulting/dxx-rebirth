@@ -289,14 +289,14 @@ void show_titles(void)
 		}
 	}
 
-	auto played = PlayMovie("intro.tex", "intro.mve", play_movie_warn_missing::urgent);
+	auto played = PlayMovie("intro.tex", "intro.mve", play_movie_warn_missing::verbose);
 
 	if (played != movie_play_status::skipped)
 		intro_played = 1;
 	else
 	{                                               //didn't get intro movie, try titles
 
-		played = PlayMovie({}, "titles.mve", play_movie_warn_missing::urgent);
+		played = PlayMovie({}, "titles.mve", play_movie_warn_missing::verbose);
 
 		if (played == movie_play_status::skipped)
 		{

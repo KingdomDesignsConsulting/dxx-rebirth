@@ -275,6 +275,11 @@ window_event_result movie::event_handler(const d_event &event)
 			MVE_rmHoldMovie();
 			break;
 
+		case event_type::mouse_button_down:
+			if (event_mouse_get_button(event) == mbtn::left)
+				return window_event_result::close;
+			break;
+
 		case event_type::key_command:
 			{
 				const auto key{event_key_get(event)};
