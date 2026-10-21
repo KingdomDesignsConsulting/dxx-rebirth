@@ -517,6 +517,12 @@ static int MakeNewPlayerFile(int allow_abort)
 	InterfaceUniqueState.update_window_title();
 	write_player_file();
 
+	// The first-pilot path does not close a pilot_selection_listbox.
+	// Verify the saved pilot before lifting the configuration-write guard.
+	if (read_player_file() != EZERO)
+		return 0;
+	ReadConfigFile(CGameCfg, GameCfg);
+	persist2_resume_config_writes_after_pilot_load();
 	return 1;
 }
 
